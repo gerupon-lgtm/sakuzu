@@ -11,6 +11,8 @@ import { rotate, alignAngle, normDeg, readableDeg } from "../shared/rotate.js";
 import { todayJst, formatTyping, parseDateInput, formatYmd } from "../shared/date.js";
 import { MSG, msgOf, COMPUTED_SUFFIX, AREA_LABEL } from "./messages.js";
 import { buildSheet, northSvg } from "./sheet.js";
+import { addRect, addFreeLine, addFreeDim, addLeader, setWitness, shapeAnchor, moveShape, rectCorners, leaderTarget, witnessRows } from "../model/annot.js";
+import { annotDefs, annotSvg, hatchFill, textSvg } from "./annot-svg.js";
 
 // ---------- 保存（IndexedDB。使えなければメモリ） ----------
 const store = (() => {
@@ -40,7 +42,7 @@ const store = (() => {
 const S = {
   view: "list", drawings: [], doc: null, pts: new Map(), prefs: { tolCm: 3, unit: "m", author: "" },
   tab: "add", mode: "polar", form: {}, active: "from", vt: { cx: 0, cy: 0, k: 60 },
-  highlight: [], msg: null, panelMin: false, tool: null, pick: [], measure: null,
+  highlight: [], msg: null, panelMin: false, tool: null, pick: [], measure: null, pickXY: [], textVertical: false, wDraft: null, moveSel: null,
 };
 const hist = createHistory(50);
 const $app = document.getElementById("app");
@@ -165,7 +167,8 @@ function closingRows() {
     return `<div class="st"><div class="h"><span class="lb">閉</span><span class="note" style="color:var(--fg)">${labelOf(l.points.at(-1))}→${labelOf(l.points[0])}（閉じる辺） ${len}</span></div></div>`;
   }).join("");
 }
-const TOOLS = [["line", "線"], ["room", "部屋"], ["road", "道路"], ["dim", "寸法"], ["text", "文字"], ["north", "北"], ["measure", "計測"], ["rotate", "回転"]];
+const TOOLS = [["line", "線"], ["room", "部屋"], ["road", "道路"], ["dim", "寸法"], ["measure", "計測"], ["rotate", "回転"]];
+const TOOLS2 = [["rect", "四角"], ["fline", "直線"], ["fdim", "寸法線"], ["text", "文字"], ["leader", "引き出し線"], ["north", "北"], ["witness", "引照点"], ["move", "移動"]];
 const TOOL_HELP = {
   line: "点を順にタップ。最初の点をタップすると閉じます。「完了」で開いた線にします。",
   room: "部屋の角の点を順にタップし、最初の点をタップすると名前の入力に進みます。",
@@ -175,26 +178,39 @@ const TOOL_HELP = {
   north: "北の記号を置く場所をタップしてください。",
   measure: "距離を測る2点をタップしてください（図面には残りません）。",
   rotate: "そろえたい辺の両端の点を、順に2つタップしてください。",
+  rect: "四角の対角の2か所をタップしてください（点の近くは点に吸い付きます）。",
+  fline: "直線の始点と終点をタップしてください（点の近くは点に吸い付きます）。",
+  fdim: "寸法線の両端をタップしてください。",
+  leader: "指す点（または位置）をタップし、次に文字を置く場所をタップしてください。",
+  witness: "引照点にする点をタップしてください。続けて対象の点（基準点など）をタップし、「完了」を押します。",
+  move: "動かしたい図形・文字をタップし、次に移動先をタップしてください。",
 };
 function elemsHtml() {
   const d = S.doc, unit = d.sheet.unit;
-  const tools = `<div class="row" style="gap:4px">${TOOLS.map(([k, t]) => `<button class="btn sm ${S.tool === k ? "on" : ""}" data-act="tool" data-tool="${k}">${t}</button>`).join("")}</div>`;
-  const help = S.tool ? `<div class="msg">${TOOL_HELP[S.tool]}${S.pick.length ? `（選択: ${S.pick.map(labelOf).join("→")}）` : ""}${["line", "room"].includes(S.tool) && S.pick.length ? ` <button class="btn sm" data-act="pickDone">完了</button>` : ""} <button class="btn sm" data-act="tool" data-tool="">やめる</button></div>` : "";
+  const tb = (list) => list.map(([k, t]) => `<button class="btn sm ${S.tool === k ? "on" : ""}" data-act="tool" data-tool="${k}">${t}</button>`).join("");
+  const tools = `<div class="row" style="gap:4px"><span class="note">作図</span>${tb(TOOLS)}</div><div class="row" style="gap:4px"><span class="note">記載</span>${tb(TOOLS2)}</div>`;
+  const help = S.tool ? `<div class="msg">${TOOL_HELP[S.tool]}${S.pick.length ? `（選択: ${S.pick.map(labelOf).join("→")}）` : ""}${["line", "room"].includes(S.tool) && S.pick.length ? ` <button class="btn sm" data-act="pickDone">完了</button>` : ""}${S.tool === "witness" && S.wDraft ? `（${esc(S.wDraft.name)} → ${S.wDraft.targets.map(labelOf).join("・") || "対象未選択"}） <button class="btn sm" data-act="witnessDone">完了</button>` : ""}${S.tool === "text" ? ` <label style="min-width:0"><input type="checkbox" data-set="textVertical" ${S.textVertical ? "checked" : ""}> 縦書き</label>` : ""}${S.tool === "move" && S.moveSel ? "（選択中）" : ""} <button class="btn sm" data-act="tool" data-tool="">やめる</button></div>` : "";
   let extra = "";
   if (S.tool === "rotate") extra = `<div class="row"><label>回転</label><input type="number" inputmode="decimal" data-set="rot" value="${roundHalfUp(rot(), 2)}">° <button class="btn sm" data-act="rot0">0°に戻す</button></div>
      <div class="row"><label>辺を</label><div class="seg"><button class="${(S.rotMode || "h") === "h" ? "on" : ""}" data-act="rotMode" data-m="h">水平に</button><button class="${S.rotMode === "v" ? "on" : ""}" data-act="rotMode" data-m="v">垂直に</button></div></div>`;
   if (S.tool === "north") extra = `<div class="row"><label>北の向き</label><input type="number" inputmode="decimal" data-set="northAng" value="${d.north?.angleDeg ?? 0}">°（上が0°・反時計回り）${d.north ? ` <button class="btn sm danger" data-act="northDel">消す</button>` : ""}</div>`;
-  const areas = closedAreas(d, S.pts).map((a, i) => `<li>図形${i + 1}: ${a.area != null ? `${AREA_LABEL} ${formatArea(a.area)}㎡` : esc(MSG[a.code]?.() ?? a.code)}</li>`).join("");
+  const hatchBtn = (kind, id, on) => `<button class="btn sm ${on ? "on" : ""}" data-act="hatch" data-kind="${kind}" data-id="${id}">斜線</button>`;
+  const areas = closedAreas(d, S.pts).map((a, i) => `<li>図形${i + 1}: ${a.area != null ? `${AREA_LABEL} ${formatArea(a.area)}㎡` : esc(MSG[a.code]?.() ?? a.code)} ${hatchBtn("line", a.lineId, d.lines.find((l) => l.id === a.lineId)?.hatch)}</li>`).join("");
   const rt = roomTable(d, S.pts);
-  const rooms = d.rooms.map((r, i) => `<li>${esc(r.name)} ${rt.rows[i].area != null ? formatArea(rt.rows[i].area) + "㎡" : "—"} <button class="btn sm" data-act="roomRename" data-id="${r.id}">名前</button> <button class="btn sm danger" data-act="roomDel" data-id="${r.id}">削除</button></li>`).join("");
+  const rooms = d.rooms.map((r, i) => `<li>${esc(r.name)} ${rt.rows[i].area != null ? formatArea(rt.rows[i].area) + "㎡" : "—"} ${hatchBtn("room", r.id, r.hatch)} <button class="btn sm" data-act="roomRename" data-id="${r.id}">名前</button> <button class="btn sm danger" data-act="roomDel" data-id="${r.id}">削除</button></li>`).join("");
   const roads = d.roads.map((r) => `<li>${esc(r.name || "道路")} 幅${formatLength(r.width, unit)} <button class="btn sm" data-act="roadFlip" data-id="${r.id}">向き⇄</button> <button class="btn sm" data-act="roadWidth" data-id="${r.id}">幅</button> <button class="btn sm danger" data-act="roadDel" data-id="${r.id}">削除</button></li>`).join("");
-  const texts = d.texts.map((t) => `<li>${esc(t.text)} <button class="btn sm danger" data-act="textDel" data-id="${t.id}">削除</button></li>`).join("");
+  const texts = d.texts.map((t) => `<li>${esc(t.text)} <button class="btn sm" data-act="textVert" data-id="${t.id}">${t.vertical ? "横書きに" : "縦書きに"}</button> <button class="btn sm danger" data-act="textDel" data-id="${t.id}">削除</button></li>`).join("");
+  const SHN = { rect: "四角", line: "直線", dim: "寸法線", leader: "引き出し線" };
+  const shapes = d.shapes.map((x) => `<li>${SHN[x.type]}${x.text || x.label ? "「" + esc(x.text || x.label) + "」" : ""}${x.type === "rect" ? ` ${formatLength(x.w, "m")}×${formatLength(x.h, "m")}m <button class="btn sm" data-act="rectSize" data-id="${x.id}">大きさ</button> <button class="btn sm" data-act="shapeText" data-id="${x.id}">文字</button>` : ""}${x.type === "dim" || x.type === "leader" ? ` <button class="btn sm" data-act="shapeText" data-id="${x.id}">文字</button>` : ""} <button class="btn sm danger" data-act="shapeDel" data-id="${x.id}">削除</button></li>`).join("");
+  const wit = d.witnesses.map((w) => `<li>${esc(w.name)}（${labelOf(w.pointId)}）→ ${w.targets.map(labelOf).join("・")} <button class="btn sm danger" data-act="witnessDel" data-id="${w.id}">削除</button></li>`).join("");
   const mdims = d.dims.filter((x) => !x.stepId && x.manual).map((x) => `<li>${labelOf(x.a)}–${labelOf(x.b)} <button class="btn sm danger" data-act="dimDel" data-id="${x.id}">削除</button></li>`).join("");
   return tools + help + extra +
     (areas ? `<h4>閉じた図形</h4><ul class="ul">${areas}</ul>` : "") +
     (rooms ? `<h4>部屋（合計 ${formatArea(rt.total)}㎡）</h4><ul class="ul">${rooms}</ul>` : "") +
     (roads ? `<h4>道路</h4><ul class="ul">${roads}</ul>` : "") +
     (texts ? `<h4>文字</h4><ul class="ul">${texts}</ul>` : "") +
+    (shapes ? `<h4>自由図形</h4><ul class="ul">${shapes}</ul>` : "") +
+    (wit ? `<h4>引照点</h4><ul class="ul">${wit}</ul>` : "") +
     (mdims ? `<h4>手動の寸法</h4><ul class="ul">${mdims}</ul>` : "") +
     `<h4>設定</h4>
    <div class="row"><label>図面名</label><input type="text" data-set="name" value="${esc(d.name)}" style="width:180px"></div>
@@ -209,7 +225,7 @@ function previewHtml() {
   const seg = (key, opts) => `<div class="seg">${opts.map(([k, t]) => `<button class="${sh[key] === k ? "on" : ""}" data-act="sheet" data-k="${key}" data-v="${k}">${t}</button>`).join("")}</div>`;
   return `<div class="preview"><div class="pctrl noprint">
     <div class="row"><label>用紙</label>${seg("paper", [["A4", "A4"], ["A3", "A3"]])}${seg("orientation", [["landscape", "横"], ["portrait", "縦"]])}</div>
-    <div class="row"><label>単位</label>${seg("unit", [["m", "m"], ["mm", "mm"]])}<label style="min-width:0"><input type="checkbox" data-set="showArea" ${sh.showArea ? "checked" : ""}> 概算面積を載せる</label></div>
+    <div class="row"><label>単位</label>${seg("unit", [["m", "m"], ["mm", "mm"]])}<label style="min-width:0"><input type="checkbox" data-set="showArea" ${sh.showArea ? "checked" : ""}> 概算面積を載せる</label><label style="min-width:0"><input type="checkbox" data-set="showWitnessTable" ${sh.showWitnessTable ? "checked" : ""}> 引照点の一覧を載せる</label></div>
     <div class="row"><label>題名</label><input type="text" data-set="title" value="${esc(sh.title)}" placeholder="${esc(d.name)}" style="width:200px"></div>
     <div class="row"><label>作成日</label><span class="dateIn"><input type="text" inputmode="numeric" id="dateText" value="${esc(formatYmd(sh.createdDate))}" placeholder="yyyy/MM/dd" style="width:120px"><button class="btn sm" data-act="cal" aria-label="カレンダー">📅</button><input type="date" id="datePick" value="${esc(sh.createdDate)}" style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none"></span><span class="note" id="dateErr"></span></div>
     <div class="row"><label>作成者</label><input type="text" data-set="author" value="${esc(sh.author)}" style="width:160px"></div>
@@ -248,6 +264,7 @@ const toWorld = (x, y) => { const r = svgRect(); return rotate({ x: (x - r.width
 function fit() {
   const ps = [...S.pts.values()].filter(usable).map((p) => rotate(p, rot()));
   for (const t of S.doc.texts) ps.push(rotate(t, rot()));
+  for (const sh of S.doc.shapes) ps.push(rotate(shapeAnchor(sh), rot()));
   if (!ps.length) return;
   const xs = ps.map((p) => p.x), ys = ps.map((p) => p.y), r = svgRect();
   const w = Math.max(...xs) - Math.min(...xs) || 1, h = Math.max(...ys) - Math.min(...ys) || 1;
@@ -258,6 +275,7 @@ function ensureVisible() {
   const r = svgRect(), m = 24;
   if ([...S.pts.values()].filter(usable).some((p) => { const q = toScr(p); return q.x < m || q.y < m || q.x > r.width - m || q.y > r.height - m; })) fit();
 }
+const AO = { id: "sc", lw: 1.2, fs: 13, sym: 6, arrow: 10, hatch: 8 };
 function dimText(a, b, label, cls = "") {
   const L = dist(a, b); if (L < 1e-9) return "";
   const A = toScr(a), B = toScr(b);
@@ -268,7 +286,7 @@ function dimText(a, b, label, cls = "") {
 }
 function drawSvg() {
   const svg = document.getElementById("svg"); if (!svg) return;
-  const P = (id) => S.pts.get(id); let g = "";
+  const P = (id) => S.pts.get(id); let g = annotDefs(AO);
   const unit = S.doc.sheet.unit;
   for (const s of S.doc.steps) if (s.type === "circles" && usable(P(s.id))) for (const k of ["a", "b"]) if (usable(P(s[k]))) { const a = toScr(P(s[k])), b = toScr(P(s.id)); g += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="#9aa" stroke-dasharray="4 4"/>`; }
   // 道路
@@ -278,12 +296,12 @@ function drawSvg() {
     g += dimText(r.dim[0], r.dim[1], `${road.name ? road.name + " " : ""}幅 ${formatLength(road.width, unit)}`); }
   // 部屋
   for (const room of S.doc.rooms) { const ps = room.points.map(P); if (ps.some((p) => !usable(p))) continue;
-    g += `<polygon points="${ps.map(toScr).map((p) => `${p.x},${p.y}`).join(" ")}" fill="rgba(46,160,90,.08)" stroke="#2e7d32" stroke-width="1.5"/>`;
+    g += `<polygon points="${ps.map(toScr).map((p) => `${p.x},${p.y}`).join(" ")}" fill="${room.hatch ? hatchFill(AO) : "rgba(46,160,90,.08)"}" stroke="#2e7d32" stroke-width="1.5"/>`;
     const pa = polygonArea(S.pts, room.points); if (pa.centroid) { const c = toScr(pa.centroid); g += `<text x="${c.x}" y="${c.y}" font-size="13" text-anchor="middle" fill="#2e7d32">${esc(room.name)} ${formatArea(pa.area)}㎡</text>`; } }
   // 線
   for (const l of S.doc.lines) { const ps = l.points.map(P); if (ps.some((p) => !usable(p))) continue;
     const d = ps.map(toScr).map((p) => `${p.x},${p.y}`).join(" ");
-    g += l.closed ? `<polygon points="${d}" fill="rgba(47,111,222,.06)" stroke="#1d2430" stroke-width="2"/>` : `<polyline points="${d}" fill="none" stroke="#1d2430" stroke-width="2"/>`; }
+    g += l.closed ? `<polygon points="${d}" fill="${l.hatch ? hatchFill(AO) : "rgba(47,111,222,.06)"}" stroke="#1d2430" stroke-width="2"/>` : `<polyline points="${d}" fill="none" stroke="#1d2430" stroke-width="2"/>`; }
   for (const [a, b] of S.highlight) if (usable(P(a)) && usable(P(b))) { const p = toScr(P(a)), q = toScr(P(b)); g += `<line x1="${p.x}" y1="${p.y}" x2="${q.x}" y2="${q.y}" stroke="#c62828" stroke-width="6" opacity=".5"/>`; }
   // 寸法（計算値の表記。F-030）
   for (const dm of S.doc.dims) { const a = P(dm.a), b = P(dm.b); if (!usable(a) || !usable(b)) continue; g += dimText(a, b, formatLength(dist(a, b), unit) + (dm.computed ? COMPUTED_SUFFIX : "")); }
@@ -293,7 +311,10 @@ function drawSvg() {
     const t = ca.area != null ? `${AREA_LABEL} ${formatArea(ca.area)}㎡` : MSG[ca.code]?.() ?? ca.code;
     if (ca.centroid || ca.code === "POLY_SELF_INTERSECT") g += `<text x="${c.x}" y="${c.y + 18}" font-size="13" font-weight="700" text-anchor="middle" fill="${ca.area != null ? "#1d2430" : "#c62828"}" stroke="#fff" stroke-width="3" paint-order="stroke">${esc(t)}</text>`; }
   // 文字・北
-  for (const t of S.doc.texts) { const c = toScr(t); g += `<text x="${c.x}" y="${c.y}" font-size="14" text-anchor="middle" fill="#333">${esc(t.text)}</text>`; }
+  for (const t of S.doc.texts) { const c = toScr(t); g += textSvg(c.x, c.y, t.text, 14, !!t.vertical, `fill="#333"`); }
+  g += annotSvg(S.doc, S.pts, toScr, AO);
+  if (S.pickXY.length) { const q = toScr(S.pickXY[0]); g += `<circle cx="${q.x}" cy="${q.y}" r="6" fill="none" stroke="#2f6fde" stroke-width="2"/>`; }
+  if (S.moveSel) { const q = toScr(S.moveSel.anchor); g += `<circle cx="${q.x}" cy="${q.y}" r="16" fill="none" stroke="#2f6fde" stroke-width="2" stroke-dasharray="4 3"/>`; }
   if (S.doc.north) { const c = toScr(S.doc.north); g += northSvg(c.x, c.y, (S.doc.north.angleDeg || 0) + rot(), 34); }
   // 選択中の点の列
   if (S.pick.length) { const d = S.pick.map(P).filter(usable).map(toScr).map((p) => `${p.x},${p.y}`).join(" "); g += `<polyline points="${d}" fill="none" stroke="#2f6fde" stroke-width="2" stroke-dasharray="6 4"/>`; }
@@ -344,9 +365,41 @@ async function onTap(x, y) {
   else if (S.active === "b") { f.b = id; }
   render();
 }
+/** 点の近くなら点に吸い付く位置 */
+function snapAt(x, y) { const id = hitPoint(x, y); if (id) { const p = S.pts.get(id); return { x: p.x, y: p.y, pointId: id }; } return { ...toWorld(x, y), pointId: null }; }
 async function onToolTap(x, y) {
   const t = S.tool, d = S.doc;
-  if (t === "text") { const w = toWorld(x, y); const s = await modal("文字を入れてください", true); if (s) { const before = snap(); addText(d, w.x, w.y, s); touch(true, before); } return render(); }
+  if (["rect", "fline", "fdim", "leader"].includes(t)) {
+    const p = snapAt(x, y); S.pickXY.push(p);
+    if (S.pickXY.length < 2) return drawSvg();
+    const [a, b] = S.pickXY; S.pickXY = [];
+    if (t === "leader") { const txt = await modal("引き出し線の文字", true); if (!txt) return render(); const before = snap(); addLeader(d, a.pointId ? { pointId: a.pointId } : { x: a.x, y: a.y }, b, txt); touch(true, before); return render(); }
+    if (dist(a, b) < 1e-6) { S.msg = { cls: "err", text: "同じ位置です。別の場所をタップしてください" }; return render(); }
+    if (t === "rect") { const txt = (await modal("四角の中の文字（なくてもよい）", true)) ?? ""; const before = snap(); addRect(d, a, b, rot(), txt); touch(true, before); return render(); }
+    if (t === "fline") { const before = snap(); addFreeLine(d, a, b); touch(true, before); return render(); }
+    if (t === "fdim") { const lab = (await modal("寸法の文字（空なら長さを自動で表示）", true)) ?? ""; const before = snap(); addFreeDim(d, a, b, lab); touch(true, before); return render(); }
+  }
+  if (t === "move") {
+    if (!S.moveSel) {
+      let best = null, bd = 30;
+      for (const sh of d.shapes) { const q = toScr(shapeAnchor(sh)); const dd = Math.hypot(q.x - x, q.y - y); if (dd < bd) { bd = dd; best = { kind: "shape", id: sh.id, anchor: shapeAnchor(sh) }; } }
+      for (const tx of d.texts) { const q = toScr(tx); const dd = Math.hypot(q.x - x, q.y - y); if (dd < bd) { bd = dd; best = { kind: "text", id: tx.id, anchor: { x: tx.x, y: tx.y } }; } }
+      if (d.north) { const q = toScr(d.north); const dd = Math.hypot(q.x - x, q.y - y); if (dd < bd) { bd = dd; best = { kind: "north", anchor: { x: d.north.x, y: d.north.y } }; } }
+      S.moveSel = best; return render();
+    }
+    const w = toWorld(x, y), sel = S.moveSel; S.moveSel = null; const dx = w.x - sel.anchor.x, dy = w.y - sel.anchor.y; const before = snap();
+    if (sel.kind === "shape") moveShape(d.shapes.find((s2) => s2.id === sel.id), dx, dy);
+    else if (sel.kind === "text") { const tx = d.texts.find((s2) => s2.id === sel.id); tx.x += dx; tx.y += dy; }
+    else { d.north.x += dx; d.north.y += dy; }
+    touch(true, before); return render();
+  }
+  if (t === "witness") {
+    const id = hitPoint(x, y); if (!id) return;
+    if (!S.wDraft) { const ex = d.witnesses.find((w) => w.pointId === id); const name = await modal("引照点の名前（例: 電柱 No.12）", true, ex?.name ?? ""); if (!name) return render(); S.wDraft = { pointId: id, name, targets: ex ? [...ex.targets] : [] }; return render(); }
+    if (id !== S.wDraft.pointId && !S.wDraft.targets.includes(id)) S.wDraft.targets.push(id);
+    return render();
+  }
+  if (t === "text") { const w = toWorld(x, y); const s = await modal("文字を入れてください", true); if (s) { const before = snap(); const tx = addText(d, w.x, w.y, s); tx.vertical = S.textVertical; touch(true, before); } return render(); }
   if (t === "north") { const w = toWorld(x, y); const before = snap(); d.north = { x: w.x, y: w.y, angleDeg: d.north?.angleDeg ?? 0 }; touch(true, before); return render(); }
   const id = hitPoint(x, y); if (!id) return;
   if ((t === "line" || t === "room") && S.pick[0] === id && S.pick.length >= 3) return finishPick(true);
@@ -403,7 +456,14 @@ $app.addEventListener("click", async (e) => {
     case "turn": f.turn = t.dataset.turn; return render();
     case "a90": f.angle = 90; if (f.turn === "S") f.turn = "R"; return render();
     case "fit": return fit();
-    case "tool": S.tool = t.dataset.tool || null; S.pick = []; S.measure = null; S.msg = null; return render();
+    case "tool": S.tool = t.dataset.tool || null; S.pick = []; S.pickXY = []; S.wDraft = null; S.moveSel = null; S.measure = null; S.msg = null; return render();
+    case "witnessDone": { const w = S.wDraft; S.wDraft = null; if (!w || !w.targets.length) { S.msg = { cls: "err", text: "対象の点を1つ以上タップしてください" }; return render(); } return edit(() => setWitness(d, w.pointId, w.name, w.targets)); }
+    case "witnessDel": return edit(() => { d.witnesses = d.witnesses.filter((w) => w.id !== id); });
+    case "hatch": return edit(() => { const o = (t.dataset.kind === "room" ? d.rooms : d.lines).find((x) => x.id === id); o.hatch = !o.hatch; });
+    case "textVert": return edit(() => { const tx = d.texts.find((x) => x.id === id); tx.vertical = !tx.vertical; });
+    case "shapeDel": return edit(() => { d.shapes = d.shapes.filter((x) => x.id !== id); });
+    case "shapeText": { const sh = d.shapes.find((x) => x.id === id); const key = sh.type === "dim" ? "label" : "text"; const v = await modal(sh.type === "dim" ? "寸法の文字（空なら長さを自動で表示）" : "文字", true, sh[key] ?? ""); if (v != null) edit(() => { sh[key] = v; }); return; }
+    case "rectSize": { const sh = d.shapes.find((x) => x.id === id); const w = num(await modal("幅（m）", true, roundHalfUp(sh.w, 3), "number")); if (!(w > 0)) return; const h = num(await modal("高さ（m）", true, roundHalfUp(sh.h, 3), "number")); if (!(h > 0)) return; return edit(() => { sh.w = w; sh.h = h; }); }
     case "pickDone": return finishPick(false);
     case "rotMode": S.rotMode = t.dataset.m; return render();
     case "rot0": edit(() => { d.sheet.rotationDeg = 0; }); return fit();
@@ -473,6 +533,8 @@ $app.addEventListener("change", async (e) => {
   if (k === "rot") { const v = num(t.value); if (!Number.isFinite(v)) return render(); const before = snap(); S.doc.sheet.rotationDeg = normDeg(v); touch(true, before); render(); return fit(); }
   if (k === "northAng") { const v = num(t.value); if (!Number.isFinite(v) || !S.doc.north) return render(); const before = snap(); S.doc.north.angleDeg = normDeg(v); touch(true, before); return render(); }
   if (k === "showArea") return setSheet("showArea", t.checked, false);
+  if (k === "showWitnessTable") return setSheet("showWitnessTable", t.checked, false);
+  if (k === "textVertical") { S.textVertical = t.checked; return; }
   if (["title", "author"].includes(k)) return setSheet(k, t.value, false);
 });
 $app.addEventListener("input", (e) => { const t = e.target; if (t.dataset.f && t.type !== "checkbox") S.form[t.dataset.f] = t.value; });

@@ -109,14 +109,17 @@ export function deletePoint(doc, pointId) {
   doc.lines = doc.lines.filter((l) => l.points.length >= 2);
   doc.rooms = doc.rooms.filter((r) => !r.points.some((p) => points.has(p)));
   doc.roads = doc.roads.filter((r) => !r.edge.some((p) => points.has(p)));
+  doc.witnesses = (doc.witnesses || []).filter((w) => !points.has(w.pointId)).map((w) => ({ ...w, targets: w.targets.filter((t) => !points.has(t)) }));
+  doc.shapes = (doc.shapes || []).filter((sh) => !(sh.type === "leader" && points.has(sh.target.pointId)));
   return points.size;
 }
 
 /** 古いデータに、後から追加した項目の既定値を入れる */
 export function normalize(doc) {
   doc.texts ??= []; doc.rooms ??= []; doc.roads ??= []; doc.dims ??= []; doc.lines ??= [];
-  doc.north ??= null;
-  doc.sheet = { paper: "A4", orientation: "landscape", unit: "m", title: "", createdDate: "", author: "", rotationDeg: 0, showArea: false, ...(doc.sheet || {}) };
+  doc.north ??= null; doc.shapes ??= []; doc.witnesses ??= [];
+  for (const t of doc.texts) t.vertical ??= false;
+  doc.sheet = { paper: "A4", orientation: "landscape", unit: "m", title: "", createdDate: "", author: "", rotationDeg: 0, showArea: false, showWitnessTable: false, ...(doc.sheet || {}) };
   for (const d of doc.dims) d.computed ??= false;
   return doc;
 }

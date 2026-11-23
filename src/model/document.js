@@ -8,8 +8,8 @@ export function createDrawing(name = "新しい図面") {
   return {
     appId: "sakuzu", schemaVersion: SCHEMA_VERSION, appVersion: APP_VERSION,
     id: uid(), name, updatedAt: new Date().toISOString(),
-    steps: [p1], lines: [], rooms: [], roads: [], dims: [], texts: [], north: null,
-    sheet: { paper: "A4", orientation: "landscape", unit: "m", title: "", createdDate: "", author: "", rotationDeg: 0, showArea: false },
+    steps: [p1], lines: [], rooms: [], roads: [], dims: [], texts: [], north: null, shapes: [], witnesses: [],
+    sheet: { paper: "A4", orientation: "landscape", unit: "m", title: "", createdDate: "", author: "", rotationDeg: 0, showArea: false, showWitnessTable: false },
   };
 }
 export function nextLabel(doc) {
