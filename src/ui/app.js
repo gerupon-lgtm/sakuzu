@@ -1,7 +1,7 @@
 // サクズ MVP（SZ-0.2.0）
 import { APP_VERSION } from "../version.js";
 import { createDrawing, SCHEMA_VERSION } from "../model/document.js";
-import { addPolar, addCircles, defaultRef, deletePoint, collectDependents, closeLineAt, addManualLine, addManualDim, addRoom, addRoad, addText, normalize } from "../model/edit.js";
+import { addPolar, addCircles, defaultRef, deletePoint, collectDependents, closeLineAt, addManualLine, addManualDim, addRoom, addRoad, addText, normalize, addBase, moveStep } from "../model/edit.js";
 import { solve, misclosure, suspectEdges, usable } from "../model/solver.js";
 import { closedAreas, roomTable, roadGeometry, polygonArea } from "../model/elements.js";
 import { createHistory } from "../model/history.js";
@@ -42,7 +42,7 @@ const store = (() => {
 const S = {
   view: "list", drawings: [], doc: null, pts: new Map(), prefs: { tolCm: 3, unit: "m", author: "" },
   tab: "add", mode: "polar", form: {}, active: "from", vt: { cx: 0, cy: 0, k: 60 },
-  highlight: [], msg: null, panelMin: false, tool: null, pick: [], measure: null, pickXY: [], textVertical: false, wDraft: null, moveSel: null,
+  highlight: [], msg: null, panelMin: false, tool: null, pick: [], measure: null, pickXY: [], textVertical: false, wDraft: null, moveSel: null, loupe: null,
 };
 const hist = createHistory(50);
 const $app = document.getElementById("app");
@@ -67,6 +67,16 @@ function modal(text, withInput = false, value = "", type = "text") {
   });
 }
 
+/** 候補の一覧から選ぶダイアログ（点が重なったとき） */
+function choose(text, options) {
+  return new Promise((res) => {
+    const d = document.createElement("dialog");
+    d.innerHTML = `<p>${esc(text)}</p><div class="row" style="flex-direction:column;align-items:stretch">${options.map((o, i) => `<button class="btn" value="${i}">${esc(o.label)}</button>`).join("")}<button class="btn" value="-1">キャンセル</button></div>`;
+    document.body.appendChild(d);
+    d.addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; const i = +b.value; d.close(); d.remove(); res(i >= 0 ? options[i].value : null); });
+    d.showModal();
+  });
+}
 let saveTimer = null;
 function touch(pushHistory = true, before = null) {
   if (pushHistory && before) hist.push(before);
@@ -90,15 +100,16 @@ function resetForm() {
   const from = last?.id ?? S.doc.steps[0]?.id;
   S.form = { from, ref: from ? defaultRef(S.doc, from) : null, turn: "S", angle: 90, d: "", closing: false, a: null, da: "", b: null, db: "" };
   if (S.form.ref) S.form.turn = "R";
-  S.active = S.mode === "polar" ? "from" : "a";
+  S.active = S.mode === "polar" ? "from" : S.mode === "base" ? "basepos" : "a";
 }
 
 // ---------- 描画 ----------
 function render() {
-  const back = S.view === "editor" ? `<button class="btn sm" data-act="back">一覧</button>` : S.view === "preview" ? `<button class="btn sm" data-act="closePreview">作図に戻る</button>` : "";
+  const back = (S.view === "editor" ? `<button class="btn sm" data-act="back">一覧</button>` : S.view === "preview" ? `<button class="btn sm" data-act="closePreview">作図に戻る</button>` : S.view === "settings" ? `<button class="btn sm" data-act="closeSettings">戻る</button>` : "")
+    + (S.view === "list" || S.view === "editor" ? ` <button class="btn sm" data-act="settings" aria-label="設定">${ICON.gear} 設定</button>` : "");
   const head = `<header class="noprint"><div class="logo">サ</div><h1>サクズ</h1><span class="sp"></span>${back}</header>`;
   const foot = `<footer class="noprint">${APP_VERSION} ・ © 2026 SIKUMI LAB</footer>`;
-  const body = S.view === "list" ? listHtml() : S.view === "preview" ? previewHtml() : editorHtml();
+  const body = S.view === "list" ? listHtml() : S.view === "preview" ? previewHtml() : S.view === "settings" ? settingsHtml() : editorHtml();
   $app.innerHTML = head + `<main>${body}</main>` + foot;
   if (S.view === "editor") { drawSvg(); bindCanvas(); }
   if (S.view === "preview") bindDateInput();
@@ -130,7 +141,11 @@ function addHtml() {
   const pending = S.doc.steps.find((s) => s.type === "circles" && !s.side && S.pts.get(s.id)?.status === "pending");
   if (pending) return `<p><b>${pending.label}</b> の候補を選んでください（図の上の点をタップしても選べます）</p>
     <div class="row"><button class="btn" style="border-color:var(--candL)" data-act="side" data-side="L">左の候補</button><button class="btn" style="border-color:var(--candR)" data-act="side" data-side="R">右の候補</button><button class="btn danger" data-act="cancelPending">取り消す</button></div>`;
-  const mode = `<div class="row"><div class="seg"><button class="${S.mode === "polar" ? "on" : ""}" data-act="mode" data-mode="polar">距離と方向</button><button class="${S.mode === "circles" ? "on" : ""}" data-act="mode" data-mode="circles">二円交点</button></div></div>`;
+  const mode = `<div class="row"><div class="seg"><button class="${S.mode === "polar" ? "on" : ""}" data-act="mode" data-mode="polar">距離と方向</button><button class="${S.mode === "circles" ? "on" : ""}" data-act="mode" data-mode="circles">二円交点</button><button class="${S.mode === "base" ? "on" : ""}" data-act="mode" data-mode="base">基準点</button></div></div>`;
+  if (S.mode === "base") return mode + `<p class="note">座標（m）を入れるか、「図から入れる」を押してから図の位置をタップします。</p>
+     <div class="row"><label>X（右）</label><input type="number" inputmode="decimal" step="0.001" data-f="bx" value="${f.bx ?? ""}">m</div>
+     <div class="row"><label>Y（上）</label><input type="number" inputmode="decimal" step="0.001" data-f="by" value="${f.by ?? ""}">m</div>
+     <div class="row"><button class="btn sm ${S.active === "basepos" ? "on" : ""}" data-act="active" data-field="basepos">図から入れる</button><button class="btn primary" data-act="addBase">基準点を追加</button></div>`;
   if (S.mode === "polar") {
     const refTxt = f.ref ? `${labelOf(f.ref[0])}→${labelOf(f.ref[1])}` : "なし（右向きを0°）";
     return mode + `<p class="note">入力欄を選んでから、図の点をタップすると入ります。</p>
@@ -152,11 +167,11 @@ function stepsHtml() {
     const p = S.pts.get(s.id) || {};
     const badge = p.status === "ok" ? "" : `<span class="badge ${p.status}">${{ warn: `接点扱い ${roundHalfUp((p.gap || 0) * 100, 1)}cm`, error: "エラー", blocked: "計算できない", pending: "候補を選ぶ" }[p.status] || ""}</span>`;
     let body = "";
-    if (s.type === "base") body = `基準点`;
+    if (s.type === "base") body = `基準点 X<input type="number" step="0.001" data-step="${s.id}" data-k="x" value="${s.x}" style="width:76px">m Y<input type="number" step="0.001" data-step="${s.id}" data-k="y" value="${s.y}" style="width:76px">m`;
     if (s.type === "polar") body = `${labelOf(s.from)}から ${{ L: "左", R: "右", S: "直進" }[s.turn]} <input type="number" data-step="${s.id}" data-k="angleDeg" value="${s.angleDeg}" style="width:60px">° <input type="number" step="0.001" data-step="${s.id}" data-k="d" value="${s.d}" style="width:76px">m${s.isClosing ? "（閉合の確認）" : ""}`;
     if (s.type === "circles") body = `${labelOf(s.a)}から<input type="number" step="0.001" data-step="${s.id}" data-k="da" value="${s.da}" style="width:70px">m・${labelOf(s.b)}から<input type="number" step="0.001" data-step="${s.id}" data-k="db" value="${s.db}" style="width:70px">m ${s.side ? `<button class="btn sm" data-act="flip" data-id="${s.id}">${s.side === "L" ? "左" : "右"}⇄</button>` : ""}`;
     const err = p.status === "error" ? `<div class="msg err">${esc(msgOf(p))}</div>` : "";
-    return `<div class="st"><div class="h"><span class="lb">${s.label}</span>${badge}<span style="flex:1"></span>${s.type !== "base" ? `<button class="btn sm danger" data-act="delPt" data-id="${s.id}">削除</button>` : ""}</div><div class="note" style="color:var(--fg)">${body}</div>${err}</div>`;
+    return `<div class="st"><div class="h"><span class="lb">${s.label}</span>${badge}<span style="flex:1"></span><button class="btn sm" data-act="stepUp" data-id="${s.id}" aria-label="上へ">↑</button><button class="btn sm" data-act="stepDown" data-id="${s.id}" aria-label="下へ">↓</button>${s.type !== "base" || S.doc.steps.filter((x) => x.type === "base").length > 1 ? `<button class="btn sm danger" data-act="delPt" data-id="${s.id}">削除</button>` : ""}</div><div class="note" style="color:var(--fg)">${body}</div>${err}</div>`;
   }).join("") + closingRows() + `</div>`;
 }
 /** 閉じた辺の長さ（計算値）を手順の一覧にも出す（F-030） */
@@ -169,6 +184,7 @@ function closingRows() {
 }
 const TOOLS = [["line", "線"], ["room", "部屋"], ["road", "道路"], ["dim", "寸法"], ["measure", "計測"], ["rotate", "回転"]];
 const TOOLS2 = [["rect", "四角"], ["fline", "直線"], ["fdim", "寸法線"], ["text", "文字"], ["leader", "引き出し線"], ["north", "北"], ["witness", "引照点"], ["move", "移動"]];
+const LOUPE_TIP = "長押しすると拡大鏡が出ます。指を動かして狙い、離すと決まります。";
 const TOOL_HELP = {
   line: "点を順にタップ。最初の点をタップすると閉じます。「完了」で開いた線にします。",
   room: "部屋の角の点を順にタップし、最初の点をタップすると名前の入力に進みます。",
@@ -183,13 +199,13 @@ const TOOL_HELP = {
   fdim: "寸法線の両端をタップしてください。",
   leader: "指す点（または位置）をタップし、次に文字を置く場所をタップしてください。",
   witness: "引照点にする点をタップしてください。続けて対象の点（基準点など）をタップし、「完了」を押します。",
-  move: "動かしたい図形・文字をタップし、次に移動先をタップしてください。",
+  move: "動かしたい図形・文字・寸法の数値・面積の文字をタップし、次に移動先をタップしてください。",
 };
 function elemsHtml() {
   const d = S.doc, unit = d.sheet.unit;
   const tb = (list) => list.map(([k, t]) => `<button class="btn sm ${S.tool === k ? "on" : ""}" data-act="tool" data-tool="${k}">${t}</button>`).join("");
   const tools = `<div class="row" style="gap:4px"><span class="note">作図</span>${tb(TOOLS)}</div><div class="row" style="gap:4px"><span class="note">記載</span>${tb(TOOLS2)}</div>`;
-  const help = S.tool ? `<div class="msg">${TOOL_HELP[S.tool]}${S.pick.length ? `（選択: ${S.pick.map(labelOf).join("→")}）` : ""}${["line", "room"].includes(S.tool) && S.pick.length ? ` <button class="btn sm" data-act="pickDone">完了</button>` : ""}${S.tool === "witness" && S.wDraft ? `（${esc(S.wDraft.name)} → ${S.wDraft.targets.map(labelOf).join("・") || "対象未選択"}） <button class="btn sm" data-act="witnessDone">完了</button>` : ""}${S.tool === "text" ? ` <label style="min-width:0"><input type="checkbox" data-set="textVertical" ${S.textVertical ? "checked" : ""}> 縦書き</label>` : ""}${S.tool === "move" && S.moveSel ? "（選択中）" : ""} <button class="btn sm" data-act="tool" data-tool="">やめる</button></div>` : "";
+  const help = S.tool ? `<div class="msg">${TOOL_HELP[S.tool]}<br><span class="note">${LOUPE_TIP}</span>${S.pick.length ? `（選択: ${S.pick.map(labelOf).join("→")}）` : ""}${["line", "room"].includes(S.tool) && S.pick.length ? ` <button class="btn sm" data-act="pickDone">完了</button>` : ""}${S.tool === "witness" && S.wDraft ? `（${esc(S.wDraft.name)} → ${S.wDraft.targets.map(labelOf).join("・") || "対象未選択"}） <button class="btn sm" data-act="witnessDone">完了</button>` : ""}${S.tool === "text" ? ` <label style="min-width:0"><input type="checkbox" data-set="textVertical" ${S.textVertical ? "checked" : ""}> 縦書き</label>` : ""}${S.tool === "move" && S.moveSel ? `（選択中。移動先をタップするか、矢印で微調整） <span class="nudge">${[["←", -1, 0], ["↑", 0, -1], ["↓", 0, 1], ["→", 1, 0]].map(([l, dx, dy]) => `<button class="btn sm" data-act="nudge" data-dx="${dx}" data-dy="${dy}" aria-label="${l}">${l}</button>`).join("")}</span> <button class="btn sm" data-act="moveDone">選択をやめる</button>` : ""} <button class="btn sm" data-act="tool" data-tool="">やめる</button></div>` : "";
   let extra = "";
   if (S.tool === "rotate") extra = `<div class="row"><label>回転</label><input type="number" inputmode="decimal" data-set="rot" value="${roundHalfUp(rot(), 2)}">° <button class="btn sm" data-act="rot0">0°に戻す</button></div>
      <div class="row"><label>辺を</label><div class="seg"><button class="${(S.rotMode || "h") === "h" ? "on" : ""}" data-act="rotMode" data-m="h">水平に</button><button class="${S.rotMode === "v" ? "on" : ""}" data-act="rotMode" data-m="v">垂直に</button></div></div>`;
@@ -215,8 +231,24 @@ function elemsHtml() {
     `<h4>設定</h4>
    <div class="row"><label>図面名</label><input type="text" data-set="name" value="${esc(d.name)}" style="width:180px"></div>
    <div class="row"><label>表示単位</label><div class="seg">${[["m", "m"], ["mm", "mm"]].map(([k, t]) => `<button class="${unit === k ? "on" : ""}" data-act="unit" data-unit="${k}">${t}</button>`).join("")}</div></div>
-   <div class="row"><label>許容値</label><input type="number" step="0.1" min="0" max="10" data-set="tol" value="${S.prefs.tolCm}">cm（二円交点）</div>`;
+   <div class="row"><label>許容値</label><span>${S.prefs.tolCm}cm（二円交点）</span><button class="btn sm" data-act="settings">設定で変える</button></div>`;
 }
+
+// ---------- 設定（S-004、F-016） ----------
+function settingsHtml() {
+  const p = S.prefs;
+  return `<div class="list"><h3>設定</h3>
+   <div class="row"><label>許容値</label><input type="number" inputmode="decimal" step="0.1" min="0" max="10" data-set="tol" value="${p.tolCm}">cm<span class="note">二円交点で、円がわずかに届かないときに接する点として扱う隙間（0〜10cm）</span></div>
+   <div class="row"><label>表示単位</label><div class="seg">${[["m", "m"], ["mm", "mm"]].map(([k, t]) => `<button class="${(p.unit || "m") === k ? "on" : ""}" data-act="prefUnit" data-unit="${k}">${t}</button>`).join("")}</div><span class="note">新しい図面の既定</span></div>
+   <div class="row"><label>作成者名</label><input type="text" data-set="prefAuthor" value="${esc(p.author || "")}" style="width:180px"><span class="note">新しい図面の表題欄に入る名前</span></div>
+   <div id="setMsg" class="note" role="status">${S.msg ? esc(S.msg.text) : ""}</div></div>`;
+}
+/** 設定画面の保存結果を、画面を描き直さずに表示する（入力中のフォーカスを奪わないため） */
+const setStatus = (text, err = false) => { const el = document.getElementById("setMsg"); if (el) { el.textContent = text; el.style.color = err ? "var(--err)" : ""; } };
+const ICON = {
+  gear: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="vertical-align:-3px"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>`,
+  cal: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" style="vertical-align:-3px"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>`,
+};
 
 // ---------- 図面のプレビュー（S-003） ----------
 function previewHtml() {
@@ -227,7 +259,7 @@ function previewHtml() {
     <div class="row"><label>用紙</label>${seg("paper", [["A4", "A4"], ["A3", "A3"]])}${seg("orientation", [["landscape", "横"], ["portrait", "縦"]])}</div>
     <div class="row"><label>単位</label>${seg("unit", [["m", "m"], ["mm", "mm"]])}<label style="min-width:0"><input type="checkbox" data-set="showArea" ${sh.showArea ? "checked" : ""}> 概算面積を載せる</label><label style="min-width:0"><input type="checkbox" data-set="showWitnessTable" ${sh.showWitnessTable ? "checked" : ""}> 引照点の一覧を載せる</label></div>
     <div class="row"><label>題名</label><input type="text" data-set="title" value="${esc(sh.title)}" placeholder="${esc(d.name)}" style="width:200px"></div>
-    <div class="row"><label>作成日</label><span class="dateIn"><input type="text" inputmode="numeric" id="dateText" value="${esc(formatYmd(sh.createdDate))}" placeholder="yyyy/MM/dd" style="width:120px"><button class="btn sm" data-act="cal" aria-label="カレンダー">📅</button><input type="date" id="datePick" value="${esc(sh.createdDate)}" style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none"></span><span class="note" id="dateErr"></span></div>
+    <div class="row"><label>作成日</label><span class="dateIn"><input type="text" inputmode="numeric" id="dateText" value="${esc(formatYmd(sh.createdDate))}" placeholder="yyyy/MM/dd" style="width:120px"><button class="btn sm" data-act="cal" aria-label="カレンダー">${ICON.cal}</button><input type="date" id="datePick" value="${esc(sh.createdDate)}" style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none"></span><span class="note" id="dateErr"></span></div>
     <div class="row"><label>作成者</label><input type="text" data-set="author" value="${esc(sh.author)}" style="width:160px"></div>
     <div class="row"><button class="btn primary" data-act="print">印刷／PDFに保存</button>${r.scale ? `<span class="note">縮尺 ${r.scale.fixed ? "1/" + r.scale.denominator : "任意"}</span>` : ""}</div></div>
     <div class="sheetWrap">${r.empty ? `<p class="note">図がありません。作図に戻って点や線を追加してください。</p>` : `<div class="sheet" style="aspect-ratio:${r.W}/${r.H}">${r.svg}</div>`}</div></div>`;
@@ -276,12 +308,27 @@ function ensureVisible() {
   if ([...S.pts.values()].filter(usable).some((p) => { const q = toScr(p); return q.x < m || q.y < m || q.x > r.width - m || q.y > r.height - m; })) fit();
 }
 const AO = { id: "sc", lw: 1.2, fs: 13, sym: 6, arrow: 10, hatch: 8 };
-function dimText(a, b, label, cls = "") {
+/** 寸法の文字の位置（離れを動かした寸法は、実座標で持つ。SZ-L07） */
+function dimLabelPos(dm, a, b) {
+  if (dm.offsetM == null) return null;
+  const L = dist(a, b); const nx = -(b.y - a.y) / L, ny = (b.x - a.x) / L;
+  return { x: (a.x + b.x) / 2 + nx * dm.offsetM, y: (a.y + b.y) / 2 + ny * dm.offsetM };
+}
+function areaLabelPos(ca) {
+  const l = S.doc.lines.find((x) => x.id === ca.lineId); if (!ca.centroid) return null;
+  return { x: ca.centroid.x + (l.areaOffset?.dx || 0), y: ca.centroid.y + (l.areaOffset?.dy || 0) };
+}
+function dimScreenPos(a, b, at) {
+  const A = toScr(a), B = toScr(b);
+  if (at) return toScr(at);
+  const n = Math.hypot(B.x - A.x, B.y - A.y), nx = -(B.y - A.y) / n, ny = (B.x - A.x) / n;
+  return { x: (A.x + B.x) / 2 + nx * 10, y: (A.y + B.y) / 2 + ny * 10 };
+}
+function dimText(a, b, label, cls = "", at = null) {
   const L = dist(a, b); if (L < 1e-9) return "";
   const A = toScr(a), B = toScr(b);
   let ang = readableDeg(Math.atan2(B.y - A.y, B.x - A.x) * 180 / Math.PI);
-  const nx = -(B.y - A.y) / Math.hypot(B.x - A.x, B.y - A.y), ny = (B.x - A.x) / Math.hypot(B.x - A.x, B.y - A.y);
-  const m = { x: (A.x + B.x) / 2 + nx * 10, y: (A.y + B.y) / 2 + ny * 10 };
+  const m = dimScreenPos(a, b, at);
   return `<text class="${cls}" x="${m.x}" y="${m.y}" font-size="12" text-anchor="middle" dominant-baseline="middle" transform="rotate(${ang} ${m.x} ${m.y})" fill="#2f6fde" stroke="#fff" stroke-width="3" paint-order="stroke">${esc(label)}</text>`;
 }
 function drawSvg() {
@@ -304,10 +351,10 @@ function drawSvg() {
     g += l.closed ? `<polygon points="${d}" fill="${l.hatch ? hatchFill(AO) : "rgba(47,111,222,.06)"}" stroke="#1d2430" stroke-width="2"/>` : `<polyline points="${d}" fill="none" stroke="#1d2430" stroke-width="2"/>`; }
   for (const [a, b] of S.highlight) if (usable(P(a)) && usable(P(b))) { const p = toScr(P(a)), q = toScr(P(b)); g += `<line x1="${p.x}" y1="${p.y}" x2="${q.x}" y2="${q.y}" stroke="#c62828" stroke-width="6" opacity=".5"/>`; }
   // 寸法（計算値の表記。F-030）
-  for (const dm of S.doc.dims) { const a = P(dm.a), b = P(dm.b); if (!usable(a) || !usable(b)) continue; g += dimText(a, b, formatLength(dist(a, b), unit) + (dm.computed ? COMPUTED_SUFFIX : "")); }
+  for (const dm of S.doc.dims) { const a = P(dm.a), b = P(dm.b); if (!usable(a) || !usable(b) || dist(a, b) < 1e-9) continue; g += dimText(a, b, formatLength(dist(a, b), unit) + (dm.computed ? COMPUTED_SUFFIX : ""), "", dimLabelPos(dm, a, b)); }
   // 概算面積（F-032）
   for (const ca of closedAreas(S.doc, S.pts)) { const l = S.doc.lines.find((x) => x.id === ca.lineId);
-    const c = ca.centroid ? toScr(ca.centroid) : toScr(P(l.points[0]) ?? { x: 0, y: 0 });
+    const lp = areaLabelPos(ca); const c = lp ? toScr(lp) : toScr(P(l.points[0]) ?? { x: 0, y: 0 });
     const t = ca.area != null ? `${AREA_LABEL} ${formatArea(ca.area)}㎡` : MSG[ca.code]?.() ?? ca.code;
     if (ca.centroid || ca.code === "POLY_SELF_INTERSECT") g += `<text x="${c.x}" y="${c.y + 18}" font-size="13" font-weight="700" text-anchor="middle" fill="${ca.area != null ? "#1d2430" : "#c62828"}" stroke="#fff" stroke-width="3" paint-order="stroke">${esc(t)}</text>`; }
   // 文字・北
@@ -326,36 +373,60 @@ function drawSvg() {
     const q = toScr(p); const sel = [S.form.from, S.form.a, S.form.b, ...S.pick].includes(s.id);
     g += `<circle cx="${q.x}" cy="${q.y}" r="${sel ? 7 : 5}" fill="${p.status === "warn" ? "#c27c0e" : sel ? "#2f6fde" : "#1d2430"}"/><text x="${q.x + 8}" y="${q.y - 8}" font-size="12" fill="#555">${s.label}</text>`;
   }
-  svg.innerHTML = g;
+  let lo = "";
+  if (S.loupe) {
+    const { x, y } = S.loupe, R = 56, Z = 2.5, cy = y > 140 ? y - 95 : y + 95;
+    lo = `<defs><clipPath id="loupeClip"><circle cx="${x}" cy="${cy}" r="${R}"/></clipPath></defs><circle cx="${x}" cy="${cy}" r="${R}" fill="#fff"/>
+     <g clip-path="url(#loupeClip)"><use href="#scene" transform="translate(${x} ${cy}) scale(${Z}) translate(${-x} ${-y})"/></g>
+     <circle cx="${x}" cy="${cy}" r="${R}" fill="none" stroke="#2f6fde" stroke-width="2"/><path d="M${x - 10} ${cy}H${x + 10}M${x} ${cy - 10}V${cy + 10}" stroke="#c62828" stroke-width="1.5"/>`;
+  }
+  svg.innerHTML = `<g id="scene">${g}</g>${lo}`;
 }
 
 // ---------- 図の操作（移動・拡大・タップ） ----------
 function bindCanvas() {
   const el = document.getElementById("cv"); const ptrs = new Map(); let moved = false, pinch = null, start = null;
-  el.addEventListener("pointerdown", (e) => { if (e.target.closest(".float")) return; el.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); moved = false; start = { x: e.clientX, y: e.clientY, cx: S.vt.cx, cy: S.vt.cy };
-    if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), k: S.vt.k }; } });
+  let holdTimer = null;
+  const rel = (e) => { const r = svgRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  el.addEventListener("pointerdown", (e) => { if (e.target.closest(".float,.measure")) return; el.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY }); moved = false; start = { x: e.clientX, y: e.clientY, cx: S.vt.cx, cy: S.vt.cy };
+    clearTimeout(holdTimer);
+    // 長押し（0.35秒）でルーペを出す。指を動かして狙い、離したところをタップとして扱う
+    if (ptrs.size === 1) holdTimer = setTimeout(() => { if (!moved && ptrs.size === 1) { S.loupe = rel(e); drawSvg(); } }, 350);
+    if (ptrs.size === 2) { clearTimeout(holdTimer); S.loupe = null; const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), k: S.vt.k }; } });
   el.addEventListener("pointermove", (e) => { if (!ptrs.has(e.pointerId)) return; ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (S.loupe && ptrs.size === 1) { S.loupe = rel(e); drawSvg(); return; }
     if (ptrs.size === 2 && pinch) { const [a, b] = [...ptrs.values()]; S.vt.k = Math.max(2, Math.min(2000, pinch.k * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d)); moved = true; drawSvg(); return; }
-    if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 6) moved = true;
+    if (Math.hypot(e.clientX - start.x, e.clientY - start.y) > 6) { moved = true; clearTimeout(holdTimer); }
     if (moved && ptrs.size === 1) { S.vt.cx = start.cx - (e.clientX - start.x) / S.vt.k; S.vt.cy = start.cy + (e.clientY - start.y) / S.vt.k; drawSvg(); } });
-  const up = (e) => { if (!ptrs.has(e.pointerId)) return; ptrs.delete(e.pointerId); if (ptrs.size < 2) pinch = null; if (!moved && ptrs.size === 0) { const r = svgRect(); onTap(e.clientX - r.left, e.clientY - r.top); } };
-  el.addEventListener("pointerup", up); el.addEventListener("pointercancel", (e) => ptrs.delete(e.pointerId));
+  const up = (e) => { if (!ptrs.has(e.pointerId)) return; ptrs.delete(e.pointerId); clearTimeout(holdTimer); if (ptrs.size < 2) pinch = null;
+    if (S.loupe && ptrs.size === 0) { const p = S.loupe; S.loupe = null; drawSvg(); return onTap(p.x, p.y); }
+    if (!moved && ptrs.size === 0) { const r = svgRect(); onTap(e.clientX - r.left, e.clientY - r.top); } };
+  el.addEventListener("pointerup", up); el.addEventListener("pointercancel", (e) => { ptrs.delete(e.pointerId); clearTimeout(holdTimer); S.loupe = null; drawSvg(); });
   el.addEventListener("wheel", (e) => { e.preventDefault(); const r = svgRect(); const sx = e.clientX - r.left, sy = e.clientY - r.top;
     const before = { x: (sx - r.width / 2) / S.vt.k + S.vt.cx, y: (r.height / 2 - sy) / S.vt.k + S.vt.cy };
     S.vt.k = Math.max(2, Math.min(2000, S.vt.k * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
     const after = { x: (sx - r.width / 2) / S.vt.k + S.vt.cx, y: (r.height / 2 - sy) / S.vt.k + S.vt.cy };
     S.vt.cx += before.x - after.x; S.vt.cy += before.y - after.y; drawSvg(); }, { passive: false });
 }
-function hitPoint(x, y) {
-  let best = null, bd = 24;
-  for (const s of S.doc.steps) { const p = S.pts.get(s.id); if (!usable(p) || s.isClosing) continue; const q = toScr(p); const d = Math.hypot(q.x - x, q.y - y); if (d < bd) { bd = d; best = s.id; } }
-  return best;
+function hitPoints(x, y) {
+  const out = [];
+  for (const s of S.doc.steps) { const p = S.pts.get(s.id); if (!usable(p) || s.isClosing) continue; const q = toScr(p); const d = Math.hypot(q.x - x, q.y - y); if (d < 24) out.push({ id: s.id, d, q }); }
+  return out.sort((a, b) => a.d - b.d);
+}
+function hitPoint(x, y) { return hitPoints(x, y)[0]?.id ?? null; }
+/** 点を選ぶ。画面上で重なっている点（8px以内）が複数あれば、一覧から選んでもらう */
+async function pickPoint(x, y) {
+  const hs = hitPoints(x, y); if (!hs.length) return null;
+  const near = hs.filter((h) => Math.hypot(h.q.x - hs[0].q.x, h.q.y - hs[0].q.y) < 8);
+  if (near.length < 2) return hs[0].id;
+  return choose("点が重なっています。どれを選びますか？", near.map((h) => ({ label: labelOf(h.id), value: h.id })));
 }
 async function onTap(x, y) {
   const pend = S.doc.steps.find((s) => s.type === "circles" && !s.side && S.pts.get(s.id)?.status === "pending");
   if (pend) { const c = S.pts.get(pend.id).candidates; for (const k of ["L", "R"]) { const q = toScr(c[k]); if (Math.hypot(q.x - x, q.y - y) < 24) return chooseSide(pend, k); } }
   if (S.tool) return onToolTap(x, y);
-  const id = hitPoint(x, y); if (!id) return;
+  if (S.mode === "base" && S.active === "basepos" && S.tab === "add") { const w = toWorld(x, y); S.form.bx = roundHalfUp(w.x, 3); S.form.by = roundHalfUp(w.y, 3); return render(); }
+  const id = await pickPoint(x, y); if (!id) return;
   if (S.tab !== "add") S.tab = "add";
   const f = S.form;
   if (S.active === "refA") { f.refA = id; S.active = "refB"; S.msg = { text: "基準の辺の終点をタップしてください" }; return render(); }
@@ -365,12 +436,31 @@ async function onTap(x, y) {
   else if (S.active === "b") { f.b = id; }
   render();
 }
+/** 選んだ図形・文字・寸法・面積の文字を動かす（移動と微調整で共通） */
+function applyMove(sel, dx, dy) {
+  const d = S.doc;
+  if (sel.kind === "shape") moveShape(d.shapes.find((s2) => s2.id === sel.id), dx, dy);
+  else if (sel.kind === "text") { const tx = d.texts.find((s2) => s2.id === sel.id); tx.x += dx; tx.y += dy; }
+  else if (sel.kind === "north") { d.north.x += dx; d.north.y += dy; }
+  else if (sel.kind === "dim") {
+    const dm = d.dims.find((x) => x.id === sel.id), a = S.pts.get(dm.a), b = S.pts.get(dm.b);
+    const p = { x: sel.anchor.x + dx, y: sel.anchor.y + dy }, L = dist(a, b);
+    dm.offsetM = ((b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x)) / L; // 辺からの符号付き距離（左が正）
+  } else if (sel.kind === "area") { const l = d.lines.find((x) => x.id === sel.id); l.areaOffset = { dx: (l.areaOffset?.dx || 0) + dx, dy: (l.areaOffset?.dy || 0) + dy }; }
+  sel.anchor = { x: sel.anchor.x + dx, y: sel.anchor.y + dy };
+}
+/** 矢印での微調整（画面上の1px分。回転していても画面の上下左右に動く） */
+function nudge(dxPx, dyPx) {
+  const sel = S.moveSel; if (!sel) return;
+  const w = rotate({ x: dxPx / S.vt.k, y: -dyPx / S.vt.k }, -rot());
+  const before = snap(); applyMove(sel, w.x, w.y); touch(true, before); render();
+}
 /** 点の近くなら点に吸い付く位置 */
-function snapAt(x, y) { const id = hitPoint(x, y); if (id) { const p = S.pts.get(id); return { x: p.x, y: p.y, pointId: id }; } return { ...toWorld(x, y), pointId: null }; }
+async function snapAt(x, y) { const id = hitPoints(x, y).length ? await pickPoint(x, y) : null; if (id) { const p = S.pts.get(id); return { x: p.x, y: p.y, pointId: id }; } return { ...toWorld(x, y), pointId: null }; }
 async function onToolTap(x, y) {
   const t = S.tool, d = S.doc;
   if (["rect", "fline", "fdim", "leader"].includes(t)) {
-    const p = snapAt(x, y); S.pickXY.push(p);
+    const p = await snapAt(x, y); S.pickXY.push(p);
     if (S.pickXY.length < 2) return drawSvg();
     const [a, b] = S.pickXY; S.pickXY = [];
     if (t === "leader") { const txt = await modal("引き出し線の文字", true); if (!txt) return render(); const before = snap(); addLeader(d, a.pointId ? { pointId: a.pointId } : { x: a.x, y: a.y }, b, txt); touch(true, before); return render(); }
@@ -385,23 +475,24 @@ async function onToolTap(x, y) {
       for (const sh of d.shapes) { const q = toScr(shapeAnchor(sh)); const dd = Math.hypot(q.x - x, q.y - y); if (dd < bd) { bd = dd; best = { kind: "shape", id: sh.id, anchor: shapeAnchor(sh) }; } }
       for (const tx of d.texts) { const q = toScr(tx); const dd = Math.hypot(q.x - x, q.y - y); if (dd < bd) { bd = dd; best = { kind: "text", id: tx.id, anchor: { x: tx.x, y: tx.y } }; } }
       if (d.north) { const q = toScr(d.north); const dd = Math.hypot(q.x - x, q.y - y); if (dd < bd) { bd = dd; best = { kind: "north", anchor: { x: d.north.x, y: d.north.y } }; } }
+      for (const dm of d.dims) { const a = S.pts.get(dm.a), b = S.pts.get(dm.b); if (!usable(a) || !usable(b) || dist(a, b) < 1e-9) continue;
+        const q = dimScreenPos(a, b, dimLabelPos(dm, a, b)); const dd = Math.hypot(q.x - x, q.y - y); if (dd < bd) { bd = dd; best = { kind: "dim", id: dm.id, anchor: toWorld(q.x, q.y) }; } }
+      for (const ca of closedAreas(d, S.pts)) { const lp = areaLabelPos(ca); if (!lp) continue; const q = toScr(lp); const dd = Math.hypot(q.x - x, q.y - y - 18); if (dd < bd) { bd = dd; best = { kind: "area", id: ca.lineId, anchor: lp }; } }
       S.moveSel = best; return render();
     }
-    const w = toWorld(x, y), sel = S.moveSel; S.moveSel = null; const dx = w.x - sel.anchor.x, dy = w.y - sel.anchor.y; const before = snap();
-    if (sel.kind === "shape") moveShape(d.shapes.find((s2) => s2.id === sel.id), dx, dy);
-    else if (sel.kind === "text") { const tx = d.texts.find((s2) => s2.id === sel.id); tx.x += dx; tx.y += dy; }
-    else { d.north.x += dx; d.north.y += dy; }
+    const w = toWorld(x, y), sel = S.moveSel; S.moveSel = null; const before = snap();
+    applyMove(sel, w.x - sel.anchor.x, w.y - sel.anchor.y);
     touch(true, before); return render();
   }
   if (t === "witness") {
-    const id = hitPoint(x, y); if (!id) return;
+    const id = await pickPoint(x, y); if (!id) return;
     if (!S.wDraft) { const ex = d.witnesses.find((w) => w.pointId === id); const name = await modal("引照点の名前（例: 電柱 No.12）", true, ex?.name ?? ""); if (!name) return render(); S.wDraft = { pointId: id, name, targets: ex ? [...ex.targets] : [] }; return render(); }
     if (id !== S.wDraft.pointId && !S.wDraft.targets.includes(id)) S.wDraft.targets.push(id);
     return render();
   }
   if (t === "text") { const w = toWorld(x, y); const s = await modal("文字を入れてください", true); if (s) { const before = snap(); const tx = addText(d, w.x, w.y, s); tx.vertical = S.textVertical; touch(true, before); } return render(); }
   if (t === "north") { const w = toWorld(x, y); const before = snap(); d.north = { x: w.x, y: w.y, angleDeg: d.north?.angleDeg ?? 0 }; touch(true, before); return render(); }
-  const id = hitPoint(x, y); if (!id) return;
+  const id = await pickPoint(x, y); if (!id) return;
   if ((t === "line" || t === "room") && S.pick[0] === id && S.pick.length >= 3) return finishPick(true);
   if (S.pick.includes(id)) return;
   S.pick.push(id);
@@ -435,7 +526,14 @@ $app.addEventListener("click", async (e) => {
   const find = (x) => S.drawings.find((dd) => dd.id === x);
   const edit = (fn) => { const before = snap(); fn(); touch(true, before); render(); };
   switch (act) {
-    case "new": { const nd = createDrawing(`図面 ${S.drawings.length + 1}`); nd.sheet.author = S.prefs.author || ""; nd.sheet.createdDate = todayJst(); await store.put(nd); return openDoc(nd); }
+    case "new": { const nd = createDrawing(`図面 ${S.drawings.length + 1}`); nd.sheet.author = S.prefs.author || ""; nd.sheet.unit = S.prefs.unit || "m"; nd.sheet.createdDate = todayJst(); await store.put(nd); return openDoc(nd); }
+    case "settings": S.prevView = S.view; S.view = "settings"; S.msg = null; return render();
+    case "closeSettings": S.msg = null; if (S.prevView === "editor" && S.doc) { S.view = "editor"; render(); return requestAnimationFrame(fit); } return openList();
+    case "prefUnit": S.prefs.unit = t.dataset.unit; await store.putPrefs(S.prefs); S.msg = { text: "表示単位を保存しました" }; return render();
+    case "addBase": { const x = num(f.bx), y = num(f.by); if (!Number.isFinite(x) || !Number.isFinite(y)) { S.msg = { cls: "err", text: "X・Y を数値で入れてください（m）" }; return render(); } return edit(() => { addBase(d, roundHalfUp(x, 3), roundHalfUp(y, 3)); S.msg = null; }); }
+    case "stepUp": case "stepDown": { const before = snap(); if (moveStep(d, id, act === "stepUp" ? -1 : 1)) { touch(true, before); S.msg = null; } else S.msg = { cls: "err", text: "その位置には動かせません（参照している点より前には置けません）" }; return render(); }
+    case "nudge": return nudge(+t.dataset.dx, +t.dataset.dy);
+    case "moveDone": S.moveSel = null; return render();
     case "open": return openDoc(structuredClone(find(id)));
     case "dup": { const nd = structuredClone(find(id)); nd.id = newUid(); nd.name += "（コピー）"; nd.updatedAt = new Date().toISOString(); await store.put(nd); return openList(); }
     case "rename": { const n = await modal("図面の名前", true, find(id).name); if (n) { const dd = find(id); dd.name = n; await store.put(dd); } return openList(); }
@@ -523,13 +621,15 @@ $app.addEventListener("change", async (e) => {
   }
   if (t.dataset.f) { S.form[t.dataset.f] = t.type === "checkbox" ? t.checked : t.value; return; }
   if (t.dataset.step) {
-    const v = num(t.value); const s = S.doc.steps.find((x) => x.id === t.dataset.step);
-    if (!(v >= 0)) { S.msg = { cls: "err", text: "数値を入れてください" }; return render(); }
-    const before = snap(); s[t.dataset.k] = t.dataset.k === "angleDeg" ? v : roundHalfUp(v, 3); touch(true, before); S.msg = null; return render();
+    const v = num(t.value); const s = S.doc.steps.find((x) => x.id === t.dataset.step); const k = t.dataset.k;
+    const okv = k === "x" || k === "y" ? Number.isFinite(v) : v >= 0;
+    if (!okv) { S.msg = { cls: "err", text: "数値を入れてください" }; return render(); }
+    const before = snap(); s[k] = k === "angleDeg" ? v : roundHalfUp(v, 3); touch(true, before); S.msg = null; return render();
   }
   const k = t.dataset.set; if (!k) return;
   if (k === "name") { const before = snap(); S.doc.name = t.value || S.doc.name; touch(true, before); return; }
-  if (k === "tol") { const v = num(t.value); if (!(v >= 0 && v <= 10)) { S.msg = { cls: "err", text: "許容値は0〜10cmで入れてください" }; return render(); } S.prefs.tolCm = v; await store.putPrefs(S.prefs); S.pts = solve(S.doc, tol()); return render(); }
+  if (k === "tol") { const v = num(t.value); if (!(v >= 0 && v <= 10)) return setStatus("許容値は0〜10cmで入れてください（保存していません）", true); S.prefs.tolCm = v; if (S.doc) S.pts = solve(S.doc, tol()); await store.putPrefs(S.prefs); return setStatus("許容値を保存しました"); }
+  if (k === "prefAuthor") { S.prefs.author = t.value; await store.putPrefs(S.prefs); return setStatus("作成者名を保存しました"); }
   if (k === "rot") { const v = num(t.value); if (!Number.isFinite(v)) return render(); const before = snap(); S.doc.sheet.rotationDeg = normDeg(v); touch(true, before); render(); return fit(); }
   if (k === "northAng") { const v = num(t.value); if (!Number.isFinite(v) || !S.doc.north) return render(); const before = snap(); S.doc.north.angleDeg = normDeg(v); touch(true, before); return render(); }
   if (k === "showArea") return setSheet("showArea", t.checked, false);
@@ -539,6 +639,11 @@ $app.addEventListener("change", async (e) => {
 });
 $app.addEventListener("input", (e) => { const t = e.target; if (t.dataset.f && t.type !== "checkbox") S.form[t.dataset.f] = t.value; });
 window.addEventListener("resize", () => S.view === "editor" && drawSvg());
+window.addEventListener("keydown", (e) => {
+  if (S.view !== "editor" || !S.moveSel || /INPUT|TEXTAREA/.test(document.activeElement?.tagName)) return;
+  const k = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[e.key]; if (!k) return;
+  e.preventDefault(); nudge(k[0] * (e.shiftKey ? 10 : 1), k[1] * (e.shiftKey ? 10 : 1));
+});
 
 // PWA（公開サイトでだけ登録する。動作確認用の1ファイル版では登録しない）
 if ("serviceWorker" in navigator && location.protocol === "https:" && !document.documentElement.dataset.preview) {

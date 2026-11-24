@@ -123,3 +123,24 @@ export function normalize(doc) {
   for (const d of doc.dims) d.computed ??= false;
   return doc;
 }
+
+/** 基準点を追加する（F-002。2つ目以降の基準点） */
+export function addBase(doc, x, y) {
+  const step = { id: newId(), type: "base", label: nextLabel(doc), x, y };
+  doc.steps.push(step); return step;
+}
+
+/** 手順の並べ替えが「前の手順だけを参照する」制約を守るか */
+export function orderIsValid(steps) {
+  const seen = new Set();
+  for (const s of steps) { if (refsOfStep(s).some((r) => !seen.has(r))) return false; seen.add(s.id); }
+  return true;
+}
+/** 手順を1つ上（dir=-1）または下（dir=+1）へ動かす。制約を破る場合は動かさず false */
+export function moveStep(doc, id, dir) {
+  const i = doc.steps.findIndex((s) => s.id === id), j = i + dir;
+  if (i < 0 || j < 0 || j >= doc.steps.length) return false;
+  const next = [...doc.steps]; [next[i], next[j]] = [next[j], next[i]];
+  if (!orderIsValid(next)) return false;
+  doc.steps = next; return true;
+}

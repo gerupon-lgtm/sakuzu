@@ -65,10 +65,12 @@ export function buildSheet(doc, pts) {
   for (const dm of doc.dims) {
     const a = P(dm.a), b = P(dm.b); if (!usable(a) || !usable(b)) continue;
     const L = Math.hypot(b.x - a.x, b.y - a.y); if (L < 1e-9) continue;
-    g += dimSvg(T(a), T(b), 5, formatLength(L, unit) + (dm.computed ? COMPUTED_SUFFIX : ""), true);
+    let at = null;
+    if (dm.offsetM != null) { const nx = -(b.y - a.y) / L, ny = (b.x - a.x) / L; at = T({ x: (a.x + b.x) / 2 + nx * dm.offsetM, y: (a.y + b.y) / 2 + ny * dm.offsetM }); }
+    g += dimSvg(T(a), T(b), 5, formatLength(L, unit) + (dm.computed ? COMPUTED_SUFFIX : ""), true, at);
   }
   // 概算面積（切り替えで印刷に載せる）
-  if (sh.showArea) for (const ca of closedAreas(doc, pts)) if (ca.centroid) { const c = T(ca.centroid); g += `<text x="${c.x}" y="${c.y + 8}" font-size="2.5" text-anchor="middle">${AREA_LABEL} ${formatArea(ca.area)}㎡</text>`; }
+  if (sh.showArea) for (const ca of closedAreas(doc, pts)) if (ca.centroid) { const lo = doc.lines.find((x) => x.id === ca.lineId)?.areaOffset; const c = T({ x: ca.centroid.x + (lo?.dx || 0), y: ca.centroid.y + (lo?.dy || 0) }); g += `<text x="${c.x}" y="${c.y + 8}" font-size="2.5" text-anchor="middle">${AREA_LABEL} ${formatArea(ca.area)}㎡</text>`; }
   // 文字
   for (const t of doc.texts) { const c = T(t); g += textSvg(c.x, c.y, t.text, t.size || 3, !!t.vertical); }
   g += annotSvg(doc, pts, T, AO);
@@ -97,17 +99,17 @@ export function buildSheet(doc, pts) {
    <text x="${M + 4}" y="${ty + 10}" font-size="5" font-weight="700">${escS(sh.title || doc.name)}</text>
    <text x="${W - M - 4}" y="${ty + 6.5}" font-size="2.8" text-anchor="end">縮尺 ${scaleTxt}　作成日 ${formatYmd(sh.createdDate) || "—"}</text>
    <text x="${W - M - 4}" y="${ty + 12}" font-size="2.8" text-anchor="end">作成者 ${escS(sh.author) || "—"}</text>`;
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}mm" height="${H}mm" font-family="var(--font, sans-serif)">
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}mm" height="${H}mm" style="font-family: var(--font, sans-serif)">
    ${annotDefs(AO)}<rect x="0" y="0" width="${W}" height="${H}" fill="#fff"/><rect x="${M}" y="${M}" width="${W - 2 * M}" height="${H - 2 * M}" fill="none" stroke="#000" stroke-width="0.5"/>${g}${tbl}${tb}</svg>`;
   return { svg, W, H, scale: sc };
 }
 
 /** 寸法（線に沿った文字。off は線から外側への離れ mm） */
-export function dimSvg(a, b, off, label, outward) {
+export function dimSvg(a, b, off, label, outward, at = null) {
   const L = Math.hypot(b.x - a.x, b.y - a.y); if (L < 1e-6) return "";
   let nx = -(b.y - a.y) / L, ny = (b.x - a.x) / L;
   if (outward && ny > 0) { nx = -nx; ny = -ny; }
-  const m = { x: (a.x + b.x) / 2 + nx * off * 0.5, y: (a.y + b.y) / 2 + ny * off * 0.5 };
+  const m = at ?? { x: (a.x + b.x) / 2 + nx * off * 0.5, y: (a.y + b.y) / 2 + ny * off * 0.5 };
   const ang = readableDeg(Math.atan2(b.y - a.y, b.x - a.x) * 180 / Math.PI);
   return `<text x="${m.x}" y="${m.y}" font-size="2.5" text-anchor="middle" dominant-baseline="middle" transform="rotate(${ang} ${m.x} ${m.y})" stroke="#fff" stroke-width="0.8" paint-order="stroke">${label}</text>`;
 }

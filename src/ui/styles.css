@@ -58,3 +58,8 @@ h4{margin:12px 0 6px;font-size:14px}
   .sheet{box-shadow:none;max-width:none;width:auto;aspect-ratio:auto!important}
   .sheet svg{width:auto;height:auto}
 }
+
+.nudge{display:inline-flex;gap:2px}
+h3{margin:6px 0 12px}
+/* 長押し（ルーペ）で文字が選択されたり、スマホのメニューが出たりしないようにする */
+.canvas,.canvas svg{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
