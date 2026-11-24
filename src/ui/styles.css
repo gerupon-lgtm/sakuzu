@@ -69,3 +69,9 @@ h3{margin:6px 0 12px}
 
 /* 数値の入力欄は右寄せ（桁がそろって見比べやすい。発案者の指示 2026-11-25） */
 input[type=number],input[inputmode=decimal]{text-align:right}
+/* 取り込み画面 */
+.imp{max-width:760px;margin:0 auto;padding:14px}.imp h2{font-size:18px;margin:4px 0}.imp .row label:first-child{min-width:88px}
+.imp select{font:inherit;padding:5px;border:1px solid var(--line);border-radius:6px;max-width:100%}
+.imp .scroll{overflow-x:auto;margin:8px 0}.prev{border-collapse:collapse;font-size:13px}.prev td{border:1px solid var(--line);padding:3px 6px;white-space:nowrap}
+.prev tr.hd td{background:#f0f2f5;font-weight:700}.prev td.cx{background:#e8f0fe}.prev td.cy{background:#e9f7ef}.prev td.cn{background:#fff6e0}
+.prev td.n{text-align:right}

@@ -121,6 +121,7 @@ export function normalize(doc) {
   for (const t of doc.texts) t.vertical ??= false;
   doc.sheet = { paper: "A4", orientation: "landscape", unit: "m", title: "", createdDate: "", author: "", rotationDeg: 0, showArea: false, showWitnessTable: false, ...(doc.sheet || {}) };
   for (const d of doc.dims) d.computed ??= false;
+  for (const s of doc.steps) s.label = String(s.label ?? "").replace(/[<>&"]/g, ""); // 画面に出す名前から記号を除く（読み込んだファイル対策）
   return doc;
 }
 

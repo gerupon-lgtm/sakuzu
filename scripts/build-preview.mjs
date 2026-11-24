@@ -1,7 +1,7 @@
 // 動作確認用に、モジュールを1つのHTMLにまとめる（公開用のビルドではない）
 import { readFileSync, writeFileSync } from "node:fs";
-const order = ["src/version.js", "src/shared/geometry.js", "src/shared/construct.js", "src/shared/round.js", "src/shared/rotate.js", "src/shared/print.js", "src/shared/date.js",
-  "src/model/document.js", "src/model/solver.js", "src/model/edit.js", "src/model/elements.js", "src/model/history.js", "src/model/annot.js", "src/ui/messages.js", "src/ui/annot-svg.js", "src/ui/sheet.js", "src/ui/app.js"];
+const order = ["src/version.js", "src/shared/geometry.js", "src/shared/construct.js", "src/shared/round.js", "src/shared/rotate.js", "src/shared/print.js", "src/shared/date.js", "src/shared/importers.js",
+  "src/model/document.js", "src/model/solver.js", "src/model/edit.js", "src/model/elements.js", "src/model/history.js", "src/model/annot.js", "src/model/importdoc.js", "src/ui/messages.js", "src/ui/annot-svg.js", "src/ui/sheet.js", "src/ui/import-view.js", "src/ui/app.js"];
 const seen = new Map();
 const js = order.map((f) => {
   const src = readFileSync(f, "utf8");

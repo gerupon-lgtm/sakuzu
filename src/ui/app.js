@@ -13,6 +13,8 @@ import { MSG, msgOf, COMPUTED_SUFFIX, AREA_LABEL } from "./messages.js";
 import { buildSheet, northSvg } from "./sheet.js";
 import { addRect, addFreeLine, addFreeDim, addLeader, setLeaderTarget, setWitness, shapeAnchor, moveShape, rectCorners, leaderTarget, witnessRows } from "../model/annot.js";
 import { annotDefs, annotSvg, hatchFill, textSvg } from "./annot-svg.js";
+import { LARGE_COUNT, startImport, reparse, importHtml, onImpInput, onImpSet, doApply } from "./import-view.js";
+import { importCandidates } from "../model/importdoc.js";
 
 // ---------- 保存（IndexedDB。使えなければメモリ） ----------
 const store = (() => {
@@ -105,11 +107,11 @@ function resetForm() {
 
 // ---------- 描画 ----------
 function render() {
-  const back = (S.view === "editor" ? `<button class="btn sm" data-act="back">一覧</button>` : S.view === "preview" ? `<button class="btn sm" data-act="closePreview">作図に戻る</button>` : S.view === "settings" ? `<button class="btn sm" data-act="closeSettings">戻る</button>` : "")
+  const back = (S.view === "editor" ? `<button class="btn sm" data-act="back">一覧</button>` : S.view === "preview" ? `<button class="btn sm" data-act="closePreview">作図に戻る</button>` : S.view === "settings" ? `<button class="btn sm" data-act="closeSettings">戻る</button>` : S.view === "import" ? `<button class="btn sm" data-act="impCancel">戻る</button>` : "")
     + (S.view === "list" || S.view === "editor" ? ` <button class="btn sm" data-act="settings" aria-label="設定">${ICON.gear} 設定</button>` : "");
   const head = `<header class="noprint"><div class="logo">サ</div><h1>サクズ</h1><span class="sp"></span>${back}</header>`;
   const foot = `<footer class="noprint">${APP_VERSION} ・ © 2026 SIKUMI LAB</footer>`;
-  const body = S.view === "list" ? listHtml() : S.view === "preview" ? previewHtml() : S.view === "settings" ? settingsHtml() : editorHtml();
+  const body = S.view === "list" ? listHtml() : S.view === "preview" ? previewHtml() : S.view === "settings" ? settingsHtml() : S.view === "import" ? importHtml(S.imp) : editorHtml();
   $app.innerHTML = head + `<main>${body}</main>` + foot;
   if (S.view === "editor") { drawSvg(); bindCanvas(); }
   if (S.view === "preview") bindDateInput();
@@ -123,6 +125,7 @@ function listHtml() {
    <button class="btn sm danger" data-act="del" data-id="${d.id}">削除</button></div>`).join("");
   return `<div class="list"><div class="row"><button class="btn primary" data-act="new">＋ 新しい図面</button>
    <label class="btn">ファイルを読み込む<input type="file" accept=".json,application/json" data-act="import" hidden></label>
+   <label class="btn">SIMA・CSV・DXFを取り込む<input type="file" data-act="importData" hidden></label>
    <button class="btn" data-act="share">アプリを共有</button></div>
    ${S.msg ? `<div class="msg ${S.msg.cls || ""}">${S.msg.html ?? esc(S.msg.text)}</div>` : ""}
    ${cards || `<p class="note">まだ図面がありません。「新しい図面」から始めてください。</p>`}</div>`;
@@ -167,12 +170,12 @@ function stepsHtml() {
     const p = S.pts.get(s.id) || {};
     const badge = p.status === "ok" ? "" : `<span class="badge ${p.status}">${{ warn: `接点扱い ${roundHalfUp((p.gap || 0) * 100, 1)}cm`, error: "エラー", blocked: "計算できない", pending: "候補を選ぶ" }[p.status] || ""}</span>`;
     let body = "";
-    if (s.type === "base") body = `基準点 X<input type="number" step="0.001" data-step="${s.id}" data-k="x" value="${s.x}" style="width:76px">m Y<input type="number" step="0.001" data-step="${s.id}" data-k="y" value="${s.y}" style="width:76px">m`;
+    if (s.type === "base") body = `${s.imported ? "座標点" : "基準点"} X<input type="number" step="0.001" data-step="${s.id}" data-k="x" value="${s.x}" style="width:76px">m Y<input type="number" step="0.001" data-step="${s.id}" data-k="y" value="${s.y}" style="width:76px">m`;
     if (s.type === "polar") body = `${labelOf(s.from)}から ${{ L: "左", R: "右", S: "直進" }[s.turn]} <input type="number" data-step="${s.id}" data-k="angleDeg" value="${s.angleDeg}" style="width:60px">° <input type="number" step="0.001" data-step="${s.id}" data-k="d" value="${s.d}" style="width:76px">m${s.isClosing ? "（閉合の確認）" : ""}`;
     if (s.type === "circles") body = `${labelOf(s.a)}から<input type="number" step="0.001" data-step="${s.id}" data-k="da" value="${s.da}" style="width:70px">m・${labelOf(s.b)}から<input type="number" step="0.001" data-step="${s.id}" data-k="db" value="${s.db}" style="width:70px">m ${s.side ? `<button class="btn sm" data-act="flip" data-id="${s.id}">${s.side === "L" ? "左" : "右"}⇄</button>` : ""}`;
     const err = p.status === "error" ? `<div class="msg err">${esc(msgOf(p))}</div>` : "";
     return `<div class="st"><div class="h"><span class="lb">${s.label}</span>${badge}<span style="flex:1"></span><button class="btn sm" data-act="stepUp" data-id="${s.id}" aria-label="上へ">↑</button><button class="btn sm" data-act="stepDown" data-id="${s.id}" aria-label="下へ">↓</button>${s.type !== "base" || S.doc.steps.filter((x) => x.type === "base").length > 1 ? `<button class="btn sm danger" data-act="delPt" data-id="${s.id}">削除</button>` : ""}</div><div class="note" style="color:var(--fg)">${body}</div>${err}</div>`;
-  }).join("") + closingRows() + `</div>`;
+  }).join("") + closingRows() + `<div class="row" style="margin-top:10px"><label class="btn sm">SIMA・CSV・DXFから点を取り込む<input type="file" data-act="importData" hidden></label></div></div>`;
 }
 /** 閉じた辺の長さ（計算値）を手順の一覧にも出す（F-030） */
 function closingRows() {
@@ -530,6 +533,24 @@ function chooseSide(step, side) {
   S.mode = "polar"; resetForm(); S.form.from = s.id; S.form.ref = [s.a, s.id]; render(); ensureVisible();
 }
 
+/** 取り込みを実行する（F-022〜F-027）。新しい図面か、開いている図面への追加 */
+async function runImport() {
+  const st = S.imp; if (!st?.data) return;
+  const n = importCandidates(st.data).length;
+  if (n > LARGE_COUNT && !(await modal(`点が ${n} 個あります。${LARGE_COUNT} を超えると動作が遅くなることがあります。続けますか？`))) return;
+  let r;
+  if (st.canAddToCurrent && st.dest === "current" && S.doc) {
+    const before = snap(); r = doApply(S.doc, st); touch(true, before); S.view = "editor";
+  } else {
+    const nd = createDrawing(st.fileName.replace(/\.[^.]+$/, "") || "取り込み"); nd.steps = [];
+    nd.sheet.author = S.prefs.author || ""; nd.sheet.unit = S.prefs.unit || "m"; nd.sheet.createdDate = todayJst();
+    r = doApply(nd, st); await store.put(nd); openDoc(nd);
+  }
+  S.imp = null;
+  S.msg = { cls: r.warnings.length ? "warn" : "", text: `点 ${r.added} 個・線 ${r.lines} 本を取り込みました` + (r.warnings.length ? `。注意: ${r.warnings.slice(0, 3).join(" ／ ")}${r.warnings.length > 3 ? ` ほか${r.warnings.length - 3}件` : ""}` : "") };
+  render(); requestAnimationFrame(fit);
+}
+
 // ---------- 操作 ----------
 $app.addEventListener("click", async (e) => {
   const t = e.target.closest("[data-act]"); if (!t || t.tagName === "INPUT") return;
@@ -537,6 +558,9 @@ $app.addEventListener("click", async (e) => {
   const find = (x) => S.drawings.find((dd) => dd.id === x);
   const edit = (fn) => { const before = snap(); fn(); touch(true, before); render(); };
   switch (act) {
+    case "impSet": if (onImpSet(S.imp, t.dataset.k, t.dataset.v)) reparse(S.imp); return render();
+    case "impCancel": { const back = S.imp?.canAddToCurrent && S.doc; S.imp = null; S.msg = null; if (back) { S.view = "editor"; render(); return requestAnimationFrame(fit); } return openList(); }
+    case "impDo": return runImport();
     case "new": { const nd = createDrawing(`図面 ${S.drawings.length + 1}`); nd.sheet.author = S.prefs.author || ""; nd.sheet.unit = S.prefs.unit || "m"; nd.sheet.createdDate = todayJst(); await store.put(nd); return openDoc(nd); }
     case "settings": S.prevView = S.view; S.view = "settings"; S.msg = null; return render();
     case "closeSettings": S.msg = null; if (S.prevView === "editor" && S.doc) { S.view = "editor"; render(); return requestAnimationFrame(fit); } return openList();
@@ -630,6 +654,13 @@ $app.addEventListener("change", async (e) => {
     } catch (err) { S.msg = { cls: "err", text: err instanceof SyntaxError ? "ファイルが壊れています" : err.message }; }
     return openList();
   }
+  if (t.dataset.act === "importData") {
+    const file = t.files[0]; if (!file) return;
+    const fromEditor = S.view === "editor" && !!S.doc;
+    if (fromEditor) { clearTimeout(saveTimer); await store.put(S.doc); }
+    S.imp = startImport(file.name, new Uint8Array(await file.arrayBuffer()), fromEditor); S.view = "import"; S.msg = null; return render();
+  }
+  if (t.dataset.imp) { if (onImpInput(S.imp, t)) reparse(S.imp); return render(); }
   if (t.dataset.f) { S.form[t.dataset.f] = t.type === "checkbox" ? t.checked : t.value; return; }
   if (t.dataset.step) {
     const v = num(t.value); const s = S.doc.steps.find((x) => x.id === t.dataset.step); const k = t.dataset.k;

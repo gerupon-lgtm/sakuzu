@@ -26,7 +26,7 @@
 | 種類 | 項目 |
 |---|---|
 | 共通 | id（点IDを兼ねる）、type、label（P1, P2…。自動で振る） |
-| base | x, y |
+| base | x, y。取り込んだ座標点は imported: true（label はファイルの点名。記号 <>&" は除く） |
 | polar | from, ref: [id, id] \| null, turn: "L"\|"R"\|"S", angleDeg, d, isClosing?: boolean |
 | circles | a, da, b, db, side: "L"\|"R"\|null（null は候補を選ぶ前） |
 
