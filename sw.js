@@ -1,7 +1,7 @@
 // サクズの Service Worker（オフラインで全機能を動かす。F-017）
-const VERSION = "SZ-0.4.0"; // src/version.js と同じ値にする（scripts/check-version.mjs で確認）
+const VERSION = "SZ-0.4.1"; // src/version.js と同じ値にする（scripts/check-version.mjs で確認）
 const CACHE = `sakuzu-${VERSION}`;
-const FILES = ["./", "index.html", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png",
+const FILES = ["./", "index.html", "manifest.webmanifest", "icons/icon-192.png", "icons/icon-512.png", "fonts/BIZUDPGothic-Regular.woff2", "fonts/BIZUDPGothic-Bold.woff2",
   "src/version.js", "src/ui/app.js", "src/ui/styles.css", "src/ui/messages.js", "src/ui/sheet.js", "src/ui/annot-svg.js",
   "src/model/document.js", "src/model/solver.js", "src/model/edit.js", "src/model/elements.js", "src/model/history.js", "src/model/annot.js",
   "src/shared/geometry.js", "src/shared/construct.js", "src/shared/round.js", "src/shared/rotate.js", "src/shared/print.js", "src/shared/date.js"];

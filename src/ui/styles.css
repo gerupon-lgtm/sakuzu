@@ -1,4 +1,7 @@
-:root{--font:"Hiragino Sans","Yu Gothic UI","Yu Gothic","Meiryo","Noto Sans JP",sans-serif;--fg:#1d2430;--muted:#6b7280;--line:#d6dae1;--bg:#f6f7f9;--card:#fff;--accent:#2f6fde;--warn:#c27c0e;--err:#c62828;--candL:#e07a1f;--candR:#7b3fd0}
+/* 書体: BIZ UDPゴシック（S-T20で発案者が選択。OFL。JIS第1・第2水準＋cp932の記号に絞って同梱。外部から読み込まない＝C-01） */
+@font-face{font-family:"SZ BIZ UDPGothic";font-weight:400;font-display:swap;src:url(../../fonts/BIZUDPGothic-Regular.woff2) format("woff2")}
+@font-face{font-family:"SZ BIZ UDPGothic";font-weight:700;font-display:swap;src:url(../../fonts/BIZUDPGothic-Bold.woff2) format("woff2")}
+:root{--font:"SZ BIZ UDPGothic","BIZ UDPGothic","Hiragino Sans","Yu Gothic UI","Meiryo","Noto Sans JP",sans-serif;--fg:#1d2430;--muted:#6b7280;--line:#d6dae1;--bg:#f6f7f9;--card:#fff;--accent:#2f6fde;--warn:#c27c0e;--err:#c62828;--candL:#e07a1f;--candR:#7b3fd0}
 *{box-sizing:border-box}html,body{margin:0;height:100%;font-family:var(--font);color:var(--fg);background:var(--bg);font-size:15px}
 button,input,select{font:inherit}button{cursor:pointer}
 .app{display:flex;flex-direction:column;height:100dvh}
@@ -63,3 +66,6 @@ h4{margin:12px 0 6px;font-size:14px}
 h3{margin:6px 0 12px}
 /* 長押し（ルーペ）で文字が選択されたり、スマホのメニューが出たりしないようにする */
 .canvas,.canvas svg{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+
+/* 数値の入力欄は右寄せ（桁がそろって見比べやすい。発案者の指示 2026-11-25） */
+input[type=number],input[inputmode=decimal]{text-align:right}

@@ -3,7 +3,8 @@
 ## デザイントークン
 
 共通モジュールの `ui/tokens.css` を正典とする（zakkuri と同じ値）。
-- フォント: `"Hiragino Sans", "Yu Gothic UI", "Yu Gothic", "Meiryo", "Noto Sans JP", sans-serif`【想定: zakkuri T-019 と同時に、モックで比べて確定する】
+- フォント: BIZ UDPゴシック（2026-11-25 発案者が比較モックから選択）。`"SZ BIZ UDPGothic", "BIZ UDPGothic", "Hiragino Sans", "Yu Gothic UI", "Meiryo", "Noto Sans JP", sans-serif`。`fonts/` に同梱（woff2、400・700、JIS第1・第2水準とcp932の記号に絞る。約1.6MB×2）。外部から読み込まない（C-01）。ライセンスは OFL（fonts/OFL.txt）
+- 数値の入力欄は右寄せ（`input[type=number]`、`inputmode=decimal`）
 - アイコン: Lucide（同梱）。アイコンだけのボタンには `aria-label` を付ける
 - 図面: 外形線は太線、補助線は破線（印刷しない）、寸法・文字は黒。白黒で印刷しても読めるようにする
 
