@@ -11,7 +11,7 @@ import { rotate, alignAngle, normDeg, readableDeg } from "../shared/rotate.js";
 import { todayJst, formatTyping, parseDateInput, formatYmd } from "../shared/date.js";
 import { MSG, msgOf, COMPUTED_SUFFIX, AREA_LABEL } from "./messages.js";
 import { buildSheet, northSvg } from "./sheet.js";
-import { addRect, addFreeLine, addFreeDim, addLeader, setWitness, shapeAnchor, moveShape, rectCorners, leaderTarget, witnessRows } from "../model/annot.js";
+import { addRect, addFreeLine, addFreeDim, addLeader, setLeaderTarget, setWitness, shapeAnchor, moveShape, rectCorners, leaderTarget, witnessRows } from "../model/annot.js";
 import { annotDefs, annotSvg, hatchFill, textSvg } from "./annot-svg.js";
 
 // ---------- 保存（IndexedDB。使えなければメモリ） ----------
@@ -197,9 +197,9 @@ const TOOL_HELP = {
   rect: "四角の対角の2か所をタップしてください（点の近くは点に吸い付きます）。",
   fline: "直線の始点と終点をタップしてください（点の近くは点に吸い付きます）。",
   fdim: "寸法線の両端をタップしてください。",
-  leader: "指す点（または位置）をタップし、次に文字を置く場所をタップしてください。",
+  leader: "指す点（または位置）をタップし、次に文字を置く場所をタップしてください。起点はあとから「移動」で□をタップして動かせます。",
   witness: "引照点にする点をタップしてください。続けて対象の点（基準点など）をタップし、「完了」を押します。",
-  move: "動かしたい図形・文字・寸法の数値・面積の文字をタップし、次に移動先をタップしてください。",
+  move: "動かしたい図形・文字・寸法の数値・面積の文字、または引き出し線の起点（□）をタップし、次に移動先をタップしてください。起点は点の近くに置くと点に付きます。",
 };
 function elemsHtml() {
   const d = S.doc, unit = d.sheet.unit;
@@ -361,6 +361,7 @@ function drawSvg() {
   for (const t of S.doc.texts) { const c = toScr(t); g += textSvg(c.x, c.y, t.text, 14, !!t.vertical, `fill="#333"`); }
   g += annotSvg(S.doc, S.pts, toScr, AO);
   if (S.pickXY.length) { const q = toScr(S.pickXY[0]); g += `<circle cx="${q.x}" cy="${q.y}" r="6" fill="none" stroke="#2f6fde" stroke-width="2"/>`; }
+  if (S.tool === "move") for (const sh of S.doc.shapes) { if (sh.type !== "leader") continue; const o = leaderTarget(sh, S.pts); if (!o) continue; const q = toScr(o); g += `<rect x="${q.x - 5}" y="${q.y - 5}" width="10" height="10" fill="#fff" stroke="#2f6fde" stroke-width="1.5"/>`; } // 起点のつまみ
   if (S.moveSel) { const q = toScr(S.moveSel.anchor); g += `<circle cx="${q.x}" cy="${q.y}" r="16" fill="none" stroke="#2f6fde" stroke-width="2" stroke-dasharray="4 3"/>`; }
   if (S.doc.north) { const c = toScr(S.doc.north); g += northSvg(c.x, c.y, (S.doc.north.angleDeg || 0) + rot(), 34); }
   // 選択中の点の列
@@ -442,6 +443,11 @@ function applyMove(sel, dx, dy) {
   if (sel.kind === "shape") moveShape(d.shapes.find((s2) => s2.id === sel.id), dx, dy);
   else if (sel.kind === "text") { const tx = d.texts.find((s2) => s2.id === sel.id); tx.x += dx; tx.y += dy; }
   else if (sel.kind === "north") { d.north.x += dx; d.north.y += dy; }
+  else if (sel.kind === "lorigin") { // 微調整は自由な位置として動かす（点に付いていたら外れる）
+    const sh = d.shapes.find((s2) => s2.id === sel.id);
+    if (sh.target.pointId) S.msg = { text: "起点を点から外しました（点に付け直すときは、点の近くをタップ）" };
+    setLeaderTarget(sh, { x: sel.anchor.x + dx, y: sel.anchor.y + dy });
+  }
   else if (sel.kind === "dim") {
     const dm = d.dims.find((x) => x.id === sel.id), a = S.pts.get(dm.a), b = S.pts.get(dm.b);
     const p = { x: sel.anchor.x + dx, y: sel.anchor.y + dy }, L = dist(a, b);
@@ -473,12 +479,17 @@ async function onToolTap(x, y) {
     if (!S.moveSel) {
       let best = null, bd = 30;
       for (const sh of d.shapes) { const q = toScr(shapeAnchor(sh)); const dd = Math.hypot(q.x - x, q.y - y); if (dd < bd) { bd = dd; best = { kind: "shape", id: sh.id, anchor: shapeAnchor(sh) }; } }
+      for (const sh of d.shapes) { if (sh.type !== "leader") continue; const o = leaderTarget(sh, S.pts); if (!o) continue; const q = toScr(o); const dd = Math.hypot(q.x - x, q.y - y); if (dd < bd) { bd = dd; best = { kind: "lorigin", id: sh.id, anchor: o }; } }
       for (const tx of d.texts) { const q = toScr(tx); const dd = Math.hypot(q.x - x, q.y - y); if (dd < bd) { bd = dd; best = { kind: "text", id: tx.id, anchor: { x: tx.x, y: tx.y } }; } }
       if (d.north) { const q = toScr(d.north); const dd = Math.hypot(q.x - x, q.y - y); if (dd < bd) { bd = dd; best = { kind: "north", anchor: { x: d.north.x, y: d.north.y } }; } }
       for (const dm of d.dims) { const a = S.pts.get(dm.a), b = S.pts.get(dm.b); if (!usable(a) || !usable(b) || dist(a, b) < 1e-9) continue;
         const q = dimScreenPos(a, b, dimLabelPos(dm, a, b)); const dd = Math.hypot(q.x - x, q.y - y); if (dd < bd) { bd = dd; best = { kind: "dim", id: dm.id, anchor: toWorld(q.x, q.y) }; } }
       for (const ca of closedAreas(d, S.pts)) { const lp = areaLabelPos(ca); if (!lp) continue; const q = toScr(lp); const dd = Math.hypot(q.x - x, q.y - y - 18); if (dd < bd) { bd = dd; best = { kind: "area", id: ca.lineId, anchor: lp }; } }
       S.moveSel = best; return render();
+    }
+    if (S.moveSel.kind === "lorigin") { // 起点は、点の近くなら点に付ける
+      const sel = S.moveSel, p = await snapAt(x, y); S.moveSel = null; const before = snap();
+      setLeaderTarget(d.shapes.find((s2) => s2.id === sel.id), p); touch(true, before); return render();
     }
     const w = toWorld(x, y), sel = S.moveSel; S.moveSel = null; const before = snap();
     applyMove(sel, w.x - sel.anchor.x, w.y - sel.anchor.y);

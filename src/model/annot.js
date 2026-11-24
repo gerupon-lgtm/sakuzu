@@ -27,6 +27,10 @@ export function leaderTarget(sh, pts) {
   if (sh.target.pointId) { const p = pts.get(sh.target.pointId); return usable(p) ? { x: p.x, y: p.y } : null; }
   return { x: sh.target.x, y: sh.target.y };
 }
+/** 引き出し線の起点だけを付け替える。pointId があれば点に付け（点が動けば追従）、なければ自由な位置に固定する */
+export function setLeaderTarget(sh, p) {
+  sh.target = p.pointId ? { pointId: p.pointId } : { x: p.x, y: p.y };
+}
 /** 図形の代表位置（移動・選択用） */
 export function shapeAnchor(sh) {
   if (sh.type === "rect") return { x: sh.cx, y: sh.cy };
