@@ -3,6 +3,8 @@ import { roundHalfUp } from "../shared/round.js";
 export const MSG = {
   CIRCLE_NO_INTERSECTION: (g) => `円が交わりません（あと${roundHalfUp(g * 100, 1)}cm足りません）`,
   CIRCLE_SAME_CENTER: () => "2つの点が同じ位置です",
+  LINE_SAME_POINTS: () => "線を決める2点が同じ位置です",
+  LINES_PARALLEL: () => "2本の線が平行なので交わりません",
   POLAR_BAD_DISTANCE: () => "距離は0より大きい値を入れてください",
   POLAR_BAD_ANGLE: () => "角度は0〜180°で入れてください",
   POLY_SELF_INTERSECT: () => "線が交差しているため計算できません",

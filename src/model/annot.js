@@ -33,12 +33,12 @@ export function setLeaderTarget(sh, p) {
 }
 /** 図形の代表位置（移動・選択用） */
 export function shapeAnchor(sh) {
-  if (sh.type === "rect") return { x: sh.cx, y: sh.cy };
+  if (sh.type === "rect" || sh.type === "sym") return { x: sh.cx, y: sh.cy };
   if (sh.type === "line" || sh.type === "dim") return { x: (sh.x1 + sh.x2) / 2, y: (sh.y1 + sh.y2) / 2 };
   return { x: sh.x, y: sh.y };
 }
 export function moveShape(sh, dx, dy) {
-  if (sh.type === "rect") { sh.cx += dx; sh.cy += dy; }
+  if (sh.type === "rect" || sh.type === "sym") { sh.cx += dx; sh.cy += dy; }
   else if (sh.type === "line" || sh.type === "dim") { sh.x1 += dx; sh.y1 += dy; sh.x2 += dx; sh.y2 += dy; }
   else { sh.x += dx; sh.y += dy; if (sh.type === "leader" && !sh.target.pointId) { sh.target.x += dx; sh.target.y += dy; } }
 }

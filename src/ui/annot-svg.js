@@ -1,6 +1,7 @@
 // 周囲の記載と引照点のSVG（作図画面と印刷で共通。T は実座標→描画座標、o は大きさの設定）
 import { rectCorners, leaderTarget, witnessRows } from "../model/annot.js";
 import { usable } from "../model/solver.js";
+import { symbolGeometry } from "../model/symbols.js";
 import { formatLength } from "../shared/round.js";
 import { readableDeg } from "../shared/rotate.js";
 import { COMPUTED_SUFFIX } from "./messages.js";
@@ -40,6 +41,10 @@ export function annotSvg(doc, pts, T, o) {
       const c = rectCorners(sh).map(T);
       g += `<polygon points="${c.map((p) => `${p.x},${p.y}`).join(" ")}" fill="none" stroke="#000" stroke-width="${o.lw * 1.2}"/>`;
       if (sh.text) { const m = T({ x: sh.cx, y: sh.cy }); g += textSvg(m.x, m.y, sh.text, o.fs, !!sh.vertical); }
+    } else if (sh.type === "sym") { // F-021 什器・出入口
+      const gm = symbolGeometry(sh);
+      for (const p of gm.polys) { const q = p.pts.map(T).map((v) => `${v.x},${v.y}`).join(" "); g += p.closed ? `<polygon points="${q}" fill="#fff" stroke="#000" stroke-width="${o.lw}"/>` : `<polyline points="${q}" fill="none" stroke="#000" stroke-width="${o.lw}"/>`; }
+      for (const t of gm.texts) { const m = T(t); g += textSvg(m.x, m.y + o.fs * 0.3, t.text, o.fs * 0.75, false); }
     } else if (sh.type === "line") {
       const a = T({ x: sh.x1, y: sh.y1 }), b = T({ x: sh.x2, y: sh.y2 });
       g += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="#000" stroke-width="${o.lw * 1.2}"/>`;

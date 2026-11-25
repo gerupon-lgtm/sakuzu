@@ -1,6 +1,8 @@
 // 部屋・道路・閉じた図形の面積（SZ-L06、F-032）
 import { area, validatePolygon, signedArea } from "../shared/geometry.js";
 import { usable } from "./solver.js";
+import { triangulate, trisValid, diagonals, flip } from "../shared/triangulate.js";
+import { sansha, cmText, cm2ToM2Text } from "../shared/sansha.js";
 
 /** 点IDの列から面積を求める。{area} または {code} */
 export function polygonArea(pts, ids) {
@@ -50,4 +52,28 @@ export function roadGeometry(doc, pts, road, ext = 1) {
 /** 閉じた線ごとの概算面積（F-032）。ずれがあっても、最初の点で閉じた形で計算する */
 export function closedAreas(doc, pts) {
   return doc.lines.filter((l) => l.closed && l.points.length >= 3).map((l) => ({ lineId: l.id, ...polygonArea(pts, l.points) }));
+}
+
+/**
+ * F-028 三斜求積。閉じた線を三角形に分け、三斜求積表を作る。
+ * 分け方は line.sanshaTris に保存（対角線の入れ替えを残すため）。点が変わって合わなくなったら自動で分け直す。
+ * 面積は「倍面積の合計 ÷ 2」を 0.01㎡ 未満切り捨て【想定】。座標法の面積との差も返す。
+ */
+export function sanshaOf(line, pts) {
+  const pa = polygonArea(pts, line.points); if (pa.code) return { code: pa.code };
+  const ps = line.points.map((id) => pts.get(id));
+  let tris = line.sanshaTris && trisValid(ps, line.sanshaTris) ? line.sanshaTris : triangulate(ps);
+  if (!tris) return { code: "POLY_SELF_INTERSECT" };
+  const r = sansha(ps, tris);
+  const half = Math.floor(r.T / 2 / 100); // cm² → 0.01㎡ 単位（切り捨て）
+  return { ...r, tris, diags: diagonals(tris, ps.length).map((d) => ({ a: line.points[d.a], b: line.points[d.b], ia: d.a, ib: d.b })),
+    areaText: `${Math.floor(half / 100)}.${String(half % 100).padStart(2, "0")}`, doubleText: cm2ToM2Text(r.T), ps,
+    rowText: r.rows.map((x) => ({ no: x.no, b: cmText(x.bCm), h: cmText(x.hCm), dbl: cm2ToM2Text(x.double) })) };
+}
+/** 対角線 a-b（点のid）を入れ替える。凸でない四角形などで入れ替えられないときは code を返す */
+export function flipSansha(line, pts, a, b) {
+  const s = sanshaOf(line, pts); if (s.code) return s;
+  const ia = line.points.indexOf(a), ib = line.points.indexOf(b);
+  const r = flip(s.ps, s.tris, ia, ib); if (r.code) return r;
+  line.sanshaTris = r.tris; return { ok: true };
 }

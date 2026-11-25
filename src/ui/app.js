@@ -1,20 +1,23 @@
 // サクズ MVP（SZ-0.2.0）
 import { APP_VERSION } from "../version.js";
 import { createDrawing, SCHEMA_VERSION } from "../model/document.js";
-import { addPolar, addCircles, defaultRef, deletePoint, collectDependents, closeLineAt, addManualLine, addManualDim, addRoom, addRoad, addText, normalize, addBase, moveStep } from "../model/edit.js";
+import { addPolar, addCircles, defaultRef, deletePoint, collectDependents, closeLineAt, addManualLine, addManualDim, addRoom, addRoad, addText, normalize, addBase, moveStep, addCross, addFoot } from "../model/edit.js";
 import { solve, misclosure, suspectEdges, usable } from "../model/solver.js";
-import { closedAreas, roomTable, roadGeometry, polygonArea } from "../model/elements.js";
+import { closedAreas, roomTable, roadGeometry, polygonArea, sanshaOf, flipSansha } from "../model/elements.js";
 import { createHistory } from "../model/history.js";
 import { formatLength, formatArea, roundHalfUp } from "../shared/round.js";
 import { dist } from "../shared/geometry.js";
 import { rotate, alignAngle, normDeg, readableDeg } from "../shared/rotate.js";
 import { todayJst, formatTyping, parseDateInput, formatYmd } from "../shared/date.js";
 import { MSG, msgOf, COMPUTED_SUFFIX, AREA_LABEL } from "./messages.js";
-import { buildSheet, northSvg } from "./sheet.js";
+import { buildSheet, northSvg, sanshaOverlay } from "./sheet.js";
 import { addRect, addFreeLine, addFreeDim, addLeader, setLeaderTarget, setWitness, shapeAnchor, moveShape, rectCorners, leaderTarget, witnessRows } from "../model/annot.js";
 import { annotDefs, annotSvg, hatchFill, textSvg } from "./annot-svg.js";
 import { LARGE_COUNT, startImport, reparse, importHtml, onImpInput, onImpSet, doApply } from "./import-view.js";
 import { importCandidates } from "../model/importdoc.js";
+import { toDxf } from "../model/dxfexport.js";
+import { SYMBOLS, addSymbol } from "../model/symbols.js";
+import { encodeSjis } from "../shared/sjis.js";
 
 // ---------- 保存（IndexedDB。使えなければメモリ） ----------
 const store = (() => {
@@ -144,7 +147,15 @@ function addHtml() {
   const pending = S.doc.steps.find((s) => s.type === "circles" && !s.side && S.pts.get(s.id)?.status === "pending");
   if (pending) return `<p><b>${pending.label}</b> の候補を選んでください（図の上の点をタップしても選べます）</p>
     <div class="row"><button class="btn" style="border-color:var(--candL)" data-act="side" data-side="L">左の候補</button><button class="btn" style="border-color:var(--candR)" data-act="side" data-side="R">右の候補</button><button class="btn danger" data-act="cancelPending">取り消す</button></div>`;
-  const mode = `<div class="row"><div class="seg"><button class="${S.mode === "polar" ? "on" : ""}" data-act="mode" data-mode="polar">距離と方向</button><button class="${S.mode === "circles" ? "on" : ""}" data-act="mode" data-mode="circles">二円交点</button><button class="${S.mode === "base" ? "on" : ""}" data-act="mode" data-mode="base">基準点</button></div></div>`;
+  const mode = `<div class="row"><div class="seg"><button class="${S.mode === "polar" ? "on" : ""}" data-act="mode" data-mode="polar">距離と方向</button><button class="${S.mode === "circles" ? "on" : ""}" data-act="mode" data-mode="circles">二円交点</button><button class="${S.mode === "cross" ? "on" : ""}" data-act="mode" data-mode="cross">交点</button><button class="${S.mode === "foot" ? "on" : ""}" data-act="mode" data-mode="foot">垂線の足</button><button class="${S.mode === "base" ? "on" : ""}" data-act="mode" data-mode="base">基準点</button></div></div>`;
+  if (S.mode === "cross") return mode + `<p class="note">2本の線を、それぞれ2点で選びます（線は延ばして交わる位置を求めます）。入力欄を選んでから図の点をタップすると、次の欄へ進みます。</p>
+     <div class="row"><label>線1</label>${pick("c1", f.c1)}–${pick("c2", f.c2)}</div>
+     <div class="row"><label>線2</label>${pick("c3", f.c3)}–${pick("c4", f.c4)}</div>
+     <div class="row"><button class="btn primary" data-act="addCross">交点を追加</button></div>`;
+  if (S.mode === "foot") return mode + `<p class="note">点から線へ下ろした垂線の足を作ります（線は延ばして求めます）。</p>
+     <div class="row"><label>点</label>${pick("fp", f.fp)}</div>
+     <div class="row"><label>線</label>${pick("fa", f.fa)}–${pick("fb", f.fb)}</div>
+     <div class="row"><button class="btn primary" data-act="addFoot">垂線の足を追加</button></div>`;
   if (S.mode === "base") return mode + `<p class="note">座標（m）を入れるか、「図から入れる」を押してから図の位置をタップします。</p>
      <div class="row"><label>X（右）</label><input type="number" inputmode="decimal" step="0.001" data-f="bx" value="${f.bx ?? ""}">m</div>
      <div class="row"><label>Y（上）</label><input type="number" inputmode="decimal" step="0.001" data-f="by" value="${f.by ?? ""}">m</div>
@@ -168,8 +179,10 @@ function addHtml() {
 function stepsHtml() {
   return `<div class="steps">` + S.doc.steps.map((s) => {
     const p = S.pts.get(s.id) || {};
-    const badge = p.status === "ok" ? "" : `<span class="badge ${p.status}">${{ warn: `接点扱い ${roundHalfUp((p.gap || 0) * 100, 1)}cm`, error: "エラー", blocked: "計算できない", pending: "候補を選ぶ" }[p.status] || ""}</span>`;
+    const badge = p.status === "ok" ? "" : `<span class="badge ${p.status}">${{ warn: p.shallow ? "浅い交わり" : `接点扱い ${roundHalfUp((p.gap || 0) * 100, 1)}cm`, error: "エラー", blocked: "計算できない", pending: "候補を選ぶ" }[p.status] || ""}</span>`;
     let body = "";
+    if (s.type === "cross") body = `交点 ${labelOf(s.a1)}–${labelOf(s.a2)} × ${labelOf(s.b1)}–${labelOf(s.b2)}${p.shallow ? `（交わる角度 ${roundHalfUp(p.angleDeg, 1)}°）` : ""}`;
+    if (s.type === "foot") body = `垂線の足 ${labelOf(s.p)} → ${labelOf(s.a)}–${labelOf(s.b)}`;
     if (s.type === "base") body = `${s.imported ? "座標点" : "基準点"} X<input type="number" step="0.001" data-step="${s.id}" data-k="x" value="${s.x}" style="width:76px">m Y<input type="number" step="0.001" data-step="${s.id}" data-k="y" value="${s.y}" style="width:76px">m`;
     if (s.type === "polar") body = `${labelOf(s.from)}から ${{ L: "左", R: "右", S: "直進" }[s.turn]} <input type="number" data-step="${s.id}" data-k="angleDeg" value="${s.angleDeg}" style="width:60px">° <input type="number" step="0.001" data-step="${s.id}" data-k="d" value="${s.d}" style="width:76px">m${s.isClosing ? "（閉合の確認）" : ""}`;
     if (s.type === "circles") body = `${labelOf(s.a)}から<input type="number" step="0.001" data-step="${s.id}" data-k="da" value="${s.da}" style="width:70px">m・${labelOf(s.b)}から<input type="number" step="0.001" data-step="${s.id}" data-k="db" value="${s.db}" style="width:70px">m ${s.side ? `<button class="btn sm" data-act="flip" data-id="${s.id}">${s.side === "L" ? "左" : "右"}⇄</button>` : ""}`;
@@ -186,7 +199,7 @@ function closingRows() {
   }).join("");
 }
 const TOOLS = [["line", "線"], ["room", "部屋"], ["road", "道路"], ["dim", "寸法"], ["measure", "計測"], ["rotate", "回転"]];
-const TOOLS2 = [["rect", "四角"], ["fline", "直線"], ["fdim", "寸法線"], ["text", "文字"], ["leader", "引き出し線"], ["north", "北"], ["witness", "引照点"], ["move", "移動"]];
+const TOOLS2 = [["sym", "記号"], ["rect", "四角"], ["fline", "直線"], ["fdim", "寸法線"], ["text", "文字"], ["leader", "引き出し線"], ["north", "北"], ["witness", "引照点"], ["move", "移動"]];
 const LOUPE_TIP = "長押しすると拡大鏡が出ます。指を動かして狙い、離すと決まります。";
 const TOOL_HELP = {
   line: "点を順にタップ。最初の点をタップすると閉じます。「完了」で開いた線にします。",
@@ -198,6 +211,7 @@ const TOOL_HELP = {
   measure: "距離を測る2点をタップしてください（図面には残りません）。",
   rotate: "そろえたい辺の両端の点を、順に2つタップしてください。",
   rect: "四角の対角の2か所をタップしてください（点の近くは点に吸い付きます）。",
+  sym: "置く記号を選んでから、置きたい場所（記号の中心）をタップしてください。向き・大きさ・左右の反転は、下の一覧で変えられます。",
   fline: "直線の始点と終点をタップしてください（点の近くは点に吸い付きます）。",
   fdim: "寸法線の両端をタップしてください。",
   leader: "指す点（または位置）をタップし、次に文字を置く場所をタップしてください。起点はあとから「移動」で□をタップして動かせます。",
@@ -212,15 +226,22 @@ function elemsHtml() {
   let extra = "";
   if (S.tool === "rotate") extra = `<div class="row"><label>回転</label><input type="number" inputmode="decimal" data-set="rot" value="${roundHalfUp(rot(), 2)}">° <button class="btn sm" data-act="rot0">0°に戻す</button></div>
      <div class="row"><label>辺を</label><div class="seg"><button class="${(S.rotMode || "h") === "h" ? "on" : ""}" data-act="rotMode" data-m="h">水平に</button><button class="${S.rotMode === "v" ? "on" : ""}" data-act="rotMode" data-m="v">垂直に</button></div></div>`;
+  if (S.tool === "sym") extra = `<div class="row" style="gap:4px">${Object.entries(SYMBOLS).map(([k, v]) => `<button class="btn sm ${S.symKind === k ? "on" : ""}" data-act="symKind" data-k="${k}">${v.name}</button>`).join("")}</div>`;
   if (S.tool === "north") extra = `<div class="row"><label>北の向き</label><input type="number" inputmode="decimal" data-set="northAng" value="${d.north?.angleDeg ?? 0}">°（上が0°・反時計回り）${d.north ? ` <button class="btn sm danger" data-act="northDel">消す</button>` : ""}</div>`;
   const hatchBtn = (kind, id, on) => `<button class="btn sm ${on ? "on" : ""}" data-act="hatch" data-kind="${kind}" data-id="${id}">斜線</button>`;
-  const areas = closedAreas(d, S.pts).map((a, i) => `<li>図形${i + 1}: ${a.area != null ? `${AREA_LABEL} ${formatArea(a.area)}㎡` : esc(MSG[a.code]?.() ?? a.code)} ${hatchBtn("line", a.lineId, d.lines.find((l) => l.id === a.lineId)?.hatch)}</li>`).join("");
+  const areas = closedAreas(d, S.pts).map((a, i) => { const l = d.lines.find((x) => x.id === a.lineId);
+    let ss = "";
+    if (l.sansha) { const s = sanshaOf(l, S.pts);
+      ss = s.code ? `<div class="note">三斜: ${esc(MSG[s.code]?.() ?? s.code)}</div>` : `<div class="note">三斜の面積 ${s.areaText}㎡（倍面積 ${s.doubleText}㎡。座標で求めた面積との差 ${roundHalfUp(s.diff, 4)}㎡）</div>`
+        + (s.diags?.length ? `<div class="row" style="gap:4px"><span class="note">対角線の入れ替え</span>${s.diags.map((x) => `<button class="btn sm" data-act="sanshaFlip" data-id="${l.id}" data-a="${x.a}" data-b="${x.b}">${esc(labelOf(x.a))}–${esc(labelOf(x.b))}</button>`).join("")}</div>` : ""); }
+    return `<li>図形${i + 1}: ${a.area != null ? `${AREA_LABEL} ${formatArea(a.area)}㎡` : esc(MSG[a.code]?.() ?? a.code)} ${hatchBtn("line", a.lineId, l?.hatch)} <button class="btn sm ${l?.sansha ? "on" : ""}" data-act="sansha" data-id="${a.lineId}">三斜</button>${ss}</li>`; }).join("");
   const rt = roomTable(d, S.pts);
   const rooms = d.rooms.map((r, i) => `<li>${esc(r.name)} ${rt.rows[i].area != null ? formatArea(rt.rows[i].area) + "㎡" : "—"} ${hatchBtn("room", r.id, r.hatch)} <button class="btn sm" data-act="roomRename" data-id="${r.id}">名前</button> <button class="btn sm danger" data-act="roomDel" data-id="${r.id}">削除</button></li>`).join("");
   const roads = d.roads.map((r) => `<li>${esc(r.name || "道路")} 幅${formatLength(r.width, unit)} <button class="btn sm" data-act="roadFlip" data-id="${r.id}">向き⇄</button> <button class="btn sm" data-act="roadWidth" data-id="${r.id}">幅</button> <button class="btn sm danger" data-act="roadDel" data-id="${r.id}">削除</button></li>`).join("");
   const texts = d.texts.map((t) => `<li>${esc(t.text)} <button class="btn sm" data-act="textVert" data-id="${t.id}">${t.vertical ? "横書きに" : "縦書きに"}</button> <button class="btn sm danger" data-act="textDel" data-id="${t.id}">削除</button></li>`).join("");
   const SHN = { rect: "四角", line: "直線", dim: "寸法線", leader: "引き出し線" };
-  const shapes = d.shapes.map((x) => `<li>${SHN[x.type]}${x.text || x.label ? "「" + esc(x.text || x.label) + "」" : ""}${x.type === "rect" ? ` ${formatLength(x.w, "m")}×${formatLength(x.h, "m")}m <button class="btn sm" data-act="rectSize" data-id="${x.id}">大きさ</button> <button class="btn sm" data-act="shapeText" data-id="${x.id}">文字</button>` : ""}${x.type === "dim" || x.type === "leader" ? ` <button class="btn sm" data-act="shapeText" data-id="${x.id}">文字</button>` : ""} <button class="btn sm danger" data-act="shapeDel" data-id="${x.id}">削除</button></li>`).join("");
+  const symName = (x) => SYMBOLS[x.kind]?.name ?? "記号";
+  const shapes = d.shapes.map((x) => x.type === "sym" ? `<li>${esc(symName(x))}${x.text ? "「" + esc(x.text) + "」" : ""} ${formatLength(x.w, "m")}×${formatLength(x.h, "m")}m <button class="btn sm" data-act="rectSize" data-id="${x.id}">大きさ</button> <button class="btn sm" data-act="symRot" data-id="${x.id}">90°回す</button> ${["door", "slide"].includes(x.kind) ? `<button class="btn sm" data-act="symMirror" data-id="${x.id}">反転</button> ` : ""}<button class="btn sm" data-act="shapeText" data-id="${x.id}">文字</button> <button class="btn sm danger" data-act="shapeDel" data-id="${x.id}">削除</button></li>` : `<li>${SHN[x.type]}${x.text || x.label ? "「" + esc(x.text || x.label) + "」" : ""}${x.type === "rect" ? ` ${formatLength(x.w, "m")}×${formatLength(x.h, "m")}m <button class="btn sm" data-act="rectSize" data-id="${x.id}">大きさ</button> <button class="btn sm" data-act="shapeText" data-id="${x.id}">文字</button>` : ""}${x.type === "dim" || x.type === "leader" ? ` <button class="btn sm" data-act="shapeText" data-id="${x.id}">文字</button>` : ""} <button class="btn sm danger" data-act="shapeDel" data-id="${x.id}">削除</button></li>`).join("");
   const wit = d.witnesses.map((w) => `<li>${esc(w.name)}（${labelOf(w.pointId)}）→ ${w.targets.map(labelOf).join("・")} <button class="btn sm danger" data-act="witnessDel" data-id="${w.id}">削除</button></li>`).join("");
   const mdims = d.dims.filter((x) => !x.stepId && x.manual).map((x) => `<li>${labelOf(x.a)}–${labelOf(x.b)} <button class="btn sm danger" data-act="dimDel" data-id="${x.id}">削除</button></li>`).join("");
   return tools + help + extra +
@@ -264,7 +285,7 @@ function previewHtml() {
     <div class="row"><label>題名</label><input type="text" data-set="title" value="${esc(sh.title)}" placeholder="${esc(d.name)}" style="width:200px"></div>
     <div class="row"><label>作成日</label><span class="dateIn"><input type="text" inputmode="numeric" id="dateText" value="${esc(formatYmd(sh.createdDate))}" placeholder="yyyy/MM/dd" style="width:120px"><button class="btn sm" data-act="cal" aria-label="カレンダー">${ICON.cal}</button><input type="date" id="datePick" value="${esc(sh.createdDate)}" style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none"></span><span class="note" id="dateErr"></span></div>
     <div class="row"><label>作成者</label><input type="text" data-set="author" value="${esc(sh.author)}" style="width:160px"></div>
-    <div class="row"><button class="btn primary" data-act="print">印刷／PDFに保存</button>${r.scale ? `<span class="note">縮尺 ${r.scale.fixed ? "1/" + r.scale.denominator : "任意"}</span>` : ""}</div></div>
+    <div class="row"><button class="btn primary" data-act="print">印刷／PDFに保存</button><button class="btn" data-act="dxf" ${r.empty ? "disabled" : ""}>DXFで書き出す</button>${r.scale ? `<span class="note">縮尺 ${r.scale.fixed ? "1/" + r.scale.denominator : "任意"}</span>` : ""}</div>${S.msg ? `<div class="msg ${S.msg.cls || ""}">${esc(S.msg.text)}</div>` : ""}</div>
     <div class="sheetWrap">${r.empty ? `<p class="note">図がありません。作図に戻って点や線を追加してください。</p>` : `<div class="sheet" style="aspect-ratio:${r.W}/${r.H}">${r.svg}</div>`}</div></div>`;
 }
 function bindDateInput() {
@@ -338,6 +359,11 @@ function drawSvg() {
   const svg = document.getElementById("svg"); if (!svg) return;
   const P = (id) => S.pts.get(id); let g = annotDefs(AO);
   const unit = S.doc.sheet.unit;
+  const dash = (a, b) => { a = toScr(a); b = toScr(b); return `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="#9aa" stroke-dasharray="4 4"/>`; };
+  for (const s of S.doc.steps) { // 交点・垂線の足の補助線（印刷には出さない）
+    if (s.type === "cross" && usable(P(s.id))) for (const k of ["a1", "a2", "b1", "b2"]) { if (usable(P(s[k]))) g += dash(P(s[k]), P(s.id)); }
+    if (s.type === "foot" && usable(P(s.id))) { if (usable(P(s.p))) g += dash(P(s.p), P(s.id)); for (const k of ["a", "b"]) if (usable(P(s[k]))) g += dash(P(s[k]), P(s.id)); }
+  }
   for (const s of S.doc.steps) if (s.type === "circles" && usable(P(s.id))) for (const k of ["a", "b"]) if (usable(P(s[k]))) { const a = toScr(P(s[k])), b = toScr(P(s.id)); g += `<line x1="${a.x}" y1="${a.y}" x2="${b.x}" y2="${b.y}" stroke="#9aa" stroke-dasharray="4 4"/>`; }
   // 道路
   for (const road of S.doc.roads) { const r = roadGeometry(S.doc, S.pts, road); if (!r) continue;
@@ -360,6 +386,8 @@ function drawSvg() {
     const lp = areaLabelPos(ca); const c = lp ? toScr(lp) : toScr(P(l.points[0]) ?? { x: 0, y: 0 });
     const t = ca.area != null ? `${AREA_LABEL} ${formatArea(ca.area)}㎡` : MSG[ca.code]?.() ?? ca.code;
     if (ca.centroid || ca.code === "POLY_SELF_INTERSECT") g += `<text x="${c.x}" y="${c.y + 18}" font-size="13" font-weight="700" text-anchor="middle" fill="${ca.area != null ? "#1d2430" : "#c62828"}" stroke="#fff" stroke-width="3" paint-order="stroke">${esc(t)}</text>`; }
+  // 三斜（F-028）: 対角線・高さ（点線）・三角形の番号
+  for (const l of S.doc.lines) if (l.closed && l.sansha) { const s = sanshaOf(l, S.pts); if (s.code) continue; g += sanshaOverlay(s, toScr, { lw: 1.2, fs: 12, dash: "5 4", color: "#1565c0" }); }
   // 文字・北
   for (const t of S.doc.texts) { const c = toScr(t); g += textSvg(c.x, c.y, t.text, 14, !!t.vertical, `fill="#333"`); }
   g += annotSvg(S.doc, S.pts, toScr, AO);
@@ -425,6 +453,8 @@ async function pickPoint(x, y) {
   if (near.length < 2) return hs[0].id;
   return choose("点が重なっています。どれを選びますか？", near.map((h) => ({ label: labelOf(h.id), value: h.id })));
 }
+/** 交点・垂線の足: 点を選んだら次の欄へ進む（最後は選択を外す） */
+const PICK_NEXT = { c1: "c2", c2: "c3", c3: "c4", c4: null, fp: "fa", fa: "fb", fb: null };
 async function onTap(x, y) {
   const pend = S.doc.steps.find((s) => s.type === "circles" && !s.side && S.pts.get(s.id)?.status === "pending");
   if (pend) { const c = S.pts.get(pend.id).candidates; for (const k of ["L", "R"]) { const q = toScr(c[k]); if (Math.hypot(q.x - x, q.y - y) < 24) return chooseSide(pend, k); } }
@@ -436,6 +466,7 @@ async function onTap(x, y) {
   if (S.active === "refA") { f.refA = id; S.active = "refB"; S.msg = { text: "基準の辺の終点をタップしてください" }; return render(); }
   if (S.active === "refB") { f.ref = [f.refA, id]; S.active = "from"; S.msg = null; if (f.turn === "S") f.turn = "R"; return render(); }
   if (S.active === "from") { f.from = id; f.ref = defaultRef(S.doc, id); }
+  else if (PICK_NEXT[S.active] !== undefined) { f[S.active] = id; S.active = PICK_NEXT[S.active]; return render(); }
   else if (S.active === "a") { f.a = id; S.active = "b"; return render(); }
   else if (S.active === "b") { f.b = id; }
   render();
@@ -478,6 +509,7 @@ async function onToolTap(x, y) {
     if (t === "fline") { const before = snap(); addFreeLine(d, a, b); touch(true, before); return render(); }
     if (t === "fdim") { const lab = (await modal("寸法の文字（空なら長さを自動で表示）", true)) ?? ""; const before = snap(); addFreeDim(d, a, b, lab); touch(true, before); return render(); }
   }
+  if (t === "sym") { if (!S.symKind) { S.msg = { cls: "err", text: "先に置く記号を選んでください" }; return render(); } const before = snap(); addSymbol(d, S.symKind, toWorld(x, y), rot()); touch(true, before); return render(); }
   if (t === "move") {
     if (!S.moveSel) {
       let best = null, bd = 30;
@@ -573,17 +605,22 @@ $app.addEventListener("click", async (e) => {
     case "dup": { const nd = structuredClone(find(id)); nd.id = newUid(); nd.name += "（コピー）"; nd.updatedAt = new Date().toISOString(); await store.put(nd); return openList(); }
     case "rename": { const n = await modal("図面の名前", true, find(id).name); if (n) { const dd = find(id); dd.name = n; await store.put(dd); } return openList(); }
     case "del": if (await modal(`「${find(id).name}」を削除します。端末の中では元に戻せません。`)) await store.del(id); return openList();
+    case "dxf": { // F-020: 文字の高さは、プレビューの縮尺で2.5mmになる長さ
+      const r = buildSheet(d, S.pts); if (r.empty) return;
+      const bytes = encodeSjis(toDxf(d, S.pts, { den: r.scale?.denominator || 100, computedSuffix: COMPUTED_SUFFIX, areaLabel: AREA_LABEL }));
+      const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([bytes], { type: "application/dxf" })); a.download = `${(d.sheet.title || d.name).replace(/[\\/:*?"<>|]/g, "_")}.dxf`; a.click();
+      S.msg = { text: "DXFを書き出しました（線・寸法・文字をレイヤーに分けています。斜線の塗りは含みません）" }; return render(); }
     case "export": { const dd = find(id); const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify(dd)], { type: "application/json" })); a.download = `${dd.name}.sakuzu.json`; a.click(); return; }
     case "share": { const url = location.origin + location.pathname; try { if (navigator.share) await navigator.share({ title: "サクズ", url }); else { await navigator.clipboard.writeText(url); S.msg = { text: "URLをコピーしました" }; render(); } } catch { S.msg = { text: url }; render(); } return; }
     case "back": clearTimeout(saveTimer); await store.put(d); S.msg = null; return openList();
-    case "preview": S.view = "preview"; if (!d.sheet.createdDate) d.sheet.createdDate = todayJst(); return render();
+    case "preview": S.view = "preview"; S.msg = null; if (!d.sheet.createdDate) d.sheet.createdDate = todayJst(); return render();
     case "closePreview": S.view = "editor"; render(); return requestAnimationFrame(fit);
     case "print": setPageSize(); return window.print();
     case "sheet": return setSheet(t.dataset.k, t.dataset.v);
     case "cal": { const p = document.getElementById("datePick"); try { p.showPicker(); } catch { p.click(); } return; }
     case "tab": S.tab = t.dataset.tab; S.panelMin = false; return render();
     case "grab": S.panelMin = !S.panelMin; return render();
-    case "mode": S.mode = t.dataset.mode; resetForm(); return render();
+    case "mode": S.mode = t.dataset.mode; resetForm(); if (S.mode === "cross") S.active = "c1"; if (S.mode === "foot") S.active = "fp"; return render();
     case "active": S.active = t.dataset.field; if (S.active === "refA") S.msg = { text: "基準の辺の始点をタップしてください" }; return render();
     case "refClear": f.ref = null; return render();
     case "turn": f.turn = t.dataset.turn; return render();
@@ -592,11 +629,18 @@ $app.addEventListener("click", async (e) => {
     case "tool": S.tool = t.dataset.tool || null; S.pick = []; S.pickXY = []; S.wDraft = null; S.moveSel = null; S.measure = null; S.msg = null; return render();
     case "witnessDone": { const w = S.wDraft; S.wDraft = null; if (!w || !w.targets.length) { S.msg = { cls: "err", text: "対象の点を1つ以上タップしてください" }; return render(); } return edit(() => setWitness(d, w.pointId, w.name, w.targets)); }
     case "witnessDel": return edit(() => { d.witnesses = d.witnesses.filter((w) => w.id !== id); });
+    case "sansha": return edit(() => { const l = d.lines.find((x) => x.id === id); l.sansha = !l.sansha; });
+    case "sanshaFlip": { const l = d.lines.find((x) => x.id === id), before = snap(); const r = flipSansha(l, S.pts, t.dataset.a, t.dataset.b);
+      if (r.code) { S.msg = { cls: "err", text: r.code === "FLIP_NOT_CONVEX" ? "この対角線は入れ替えられません（へこんだ四角形になるため）" : "入れ替えられません" }; return render(); }
+      touch(true, before); S.msg = null; return render(); }
     case "hatch": return edit(() => { const o = (t.dataset.kind === "room" ? d.rooms : d.lines).find((x) => x.id === id); o.hatch = !o.hatch; });
     case "textVert": return edit(() => { const tx = d.texts.find((x) => x.id === id); tx.vertical = !tx.vertical; });
     case "shapeDel": return edit(() => { d.shapes = d.shapes.filter((x) => x.id !== id); });
     case "shapeText": { const sh = d.shapes.find((x) => x.id === id); const key = sh.type === "dim" ? "label" : "text"; const v = await modal(sh.type === "dim" ? "寸法の文字（空なら長さを自動で表示）" : "文字", true, sh[key] ?? ""); if (v != null) edit(() => { sh[key] = v; }); return; }
-    case "rectSize": { const sh = d.shapes.find((x) => x.id === id); const w = num(await modal("幅（m）", true, roundHalfUp(sh.w, 3), "number")); if (!(w > 0)) return; const h = num(await modal("高さ（m）", true, roundHalfUp(sh.h, 3), "number")); if (!(h > 0)) return; return edit(() => { sh.w = w; sh.h = h; }); }
+    case "symKind": S.symKind = t.dataset.k; return render();
+    case "symRot": return edit(() => { const sh = d.shapes.find((x) => x.id === id); sh.angleDeg = ((sh.angleDeg || 0) + 90) % 360; });
+    case "symMirror": return edit(() => { const sh = d.shapes.find((x) => x.id === id); sh.mirror = !sh.mirror; });
+    case "rectSize": { const sh = d.shapes.find((x) => x.id === id); const w = num(await modal("幅（m）", true, roundHalfUp(sh.w, 3), "number")); if (!(w > 0)) return; const h = sh.kind === "door" ? w : num(await modal(sh.type === "sym" ? "奥行き（m）" : "高さ（m）", true, roundHalfUp(sh.h, 3), "number")); if (!(h > 0)) return; return edit(() => { sh.w = w; sh.h = h; }); }
     case "pickDone": return finishPick(false);
     case "rotMode": S.rotMode = t.dataset.m; return render();
     case "rot0": edit(() => { d.sheet.rotationDeg = 0; }); return fit();
@@ -624,6 +668,16 @@ $app.addEventListener("click", async (e) => {
     case "clKeep": { const l = d.lines.find((x) => x.id === id); l.closure.choice = "keep"; S.msg = { text: "そのまま閉じました" }; S.highlight = []; touch(false); return render(); }
     case "clHint": { const l = d.lines.find((x) => x.id === id); const m = misclosure(d, S.pts, l); S.highlight = suspectEdges(S.pts, l, m.v); drawSvg(); return; }
     case "closeLine": { const before = snap(); const l = closeLineAt(d, f.from); if (!l) { S.msg = { cls: "err", text: "閉じられる線がありません（3点以上の線の最後の点を選んでください）" }; return render(); } touch(true, before); S.msg = { text: "閉じました（閉じる辺は計算値）" }; return render(); }
+    case "addCross": case "addFoot": {
+      const k = act === "addCross" ? ["c1", "c2", "c3", "c4"] : ["fp", "fa", "fb"];
+      if (k.some((x) => !f[x])) { S.msg = { cls: "err", text: "点をすべて選んでください" }; return render(); }
+      const before = snap();
+      const st = act === "addCross" ? addCross(d, { a1: f.c1, a2: f.c2, b1: f.c3, b2: f.c4 }) : addFoot(d, { p: f.fp, a: f.fa, b: f.fb });
+      touch(true, before); const p = S.pts.get(st.id);
+      if (p.status === "error") { d.steps.pop(); touch(false); S.msg = { cls: "err", text: msgOf(p) }; }
+      else { S.msg = p.shallow ? { cls: "warn", text: `2本の線の交わる角度が ${roundHalfUp(p.angleDeg, 1)}° と浅いため、少しの誤差で交点が大きく動きます` } : null; for (const x of k) f[x] = null; S.active = k[0]; }
+      render(); ensureVisible(); return;
+    }
     case "addCircles": {
       const da = num(f.da), db = num(f.db);
       if (!f.a || !f.b) { S.msg = { cls: "err", text: "点Aと点Bを選んでください" }; return render(); }

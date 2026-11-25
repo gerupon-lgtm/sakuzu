@@ -1,8 +1,9 @@
 // SZ-L01〜L03: 手順を順に計算する。状態: ok / warn / error / pending / blocked
-import { polar, circleIntersect, candidates } from "../shared/construct.js";
+import { polar, circleIntersect, candidates, lineIntersect, perpFoot } from "../shared/construct.js";
 import { headingOf, dist } from "../shared/geometry.js";
 import { refsOfStep } from "./document.js";
 
+export const SHALLOW_DEG = 10; // 【想定】交点の注意を出す角度
 export const usable = (p) => p && (p.status === "ok" || p.status === "warn");
 
 export function solve(doc, tol = 0.03) {
@@ -18,6 +19,18 @@ export function solve(doc, tol = 0.03) {
       const h = s.ref ? headingOf(pts.get(s.ref[0]), pts.get(s.ref[1])) : 0;
       const p = polar(from, h, s.turn, s.angleDeg, s.d);
       pts.set(s.id, { x: p.x, y: p.y, status: "ok" });
+      continue;
+    }
+    if (s.type === "cross") { // F-019 2本の線の交点。交わる角度が10°未満なら注意（少しの誤差で位置が大きく動くため）
+      const r = lineIntersect(pts.get(s.a1), pts.get(s.a2), pts.get(s.b1), pts.get(s.b2));
+      if (r.status === "error") { pts.set(s.id, { status: "error", code: r.code }); continue; }
+      pts.set(s.id, { ...r.point, status: r.angleDeg < SHALLOW_DEG ? "warn" : "ok", angleDeg: r.angleDeg, shallow: r.angleDeg < SHALLOW_DEG });
+      continue;
+    }
+    if (s.type === "foot") { // F-019 垂線の足
+      const r = perpFoot(pts.get(s.p), pts.get(s.a), pts.get(s.b));
+      if (r.status === "error") { pts.set(s.id, { status: "error", code: r.code }); continue; }
+      pts.set(s.id, { ...r.point, status: "ok" });
       continue;
     }
     if (s.type === "circles") {

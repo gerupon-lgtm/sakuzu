@@ -21,5 +21,7 @@ export function nextLabel(doc) {
 export function refsOfStep(s) {
   if (s.type === "polar") return [s.from, ...(s.ref || [])];
   if (s.type === "circles") return [s.a, s.b];
+  if (s.type === "cross") return [s.a1, s.a2, s.b1, s.b2];
+  if (s.type === "foot") return [s.p, s.a, s.b];
   return [];
 }

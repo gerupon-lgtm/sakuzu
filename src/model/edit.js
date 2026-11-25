@@ -126,6 +126,10 @@ export function normalize(doc) {
 }
 
 /** 基準点を追加する（F-002。2つ目以降の基準点） */
+/** F-019 2本の線（a1-a2・b1-b2 を延ばした線）の交点 */
+export function addCross(doc, { a1, a2, b1, b2 }) { const s = { id: newId(), type: "cross", label: nextLabel(doc), a1, a2, b1, b2 }; doc.steps.push(s); return s; }
+/** F-019 点 p から線 a-b へ下ろした垂線の足 */
+export function addFoot(doc, { p, a, b }) { const s = { id: newId(), type: "foot", label: nextLabel(doc), p, a, b }; doc.steps.push(s); return s; }
 export function addBase(doc, x, y) {
   const step = { id: newId(), type: "base", label: nextLabel(doc), x, y };
   doc.steps.push(step); return step;
