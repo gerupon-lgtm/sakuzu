@@ -12,7 +12,7 @@ AGENTS.md（Codex）と CLAUDE.md（Claude Code）は、どちらもこのファ
 - 道路の線は、選んだ辺の両端から1mずつ延ばして描く（logic-design.md の SZ-L06）
 - 図面の縮尺の候補は 1/20, 1/30, 1/50, 1/100, 1/150, 1/200, 1/250, 1/300, 1/500（SZ-L08）
 - 「測り直す箇所の目安」は、ずれの向きとの角度の差が20°以内の辺とする（SZ-L05）
-- アイコンは暫定値を使う
+- アプリのロゴ・アイコンは案Aを使う（S-T36、docs/screens.md のデザイントークン）
 
 ## 技術スタック
 
@@ -26,7 +26,7 @@ AGENTS.md（Codex）と CLAUDE.md（Claude Code）は、どちらもこのファ
 
 ```
 index.html / manifest.webmanifest / sw.js / CNAME
-src/version.js      版の正典（APP_VERSION = "SZ-0.6.0"）
+src/version.js      版の正典（APP_VERSION = "SZ-0.6.1"）
 src/model/          図面のデータと再計算エンジン（DOMに触らない。テストする）
   document.js solver.js edit.js elements.js annot.js importdoc.js symbols.js dxfexport.js history.js
 src/ui/             画面（一覧、作図、プレビュー、設定）
@@ -46,7 +46,7 @@ docs/
 
 ## バージョン管理
 
-- 形式: `SZ-MAJOR.MINOR.PATCH`（現在 `SZ-0.6.0`）。PATCHは小さな修正、MINORは互換性のある機能の追加、MAJORは作業ファイルの互換性が壊れる変更。上位の数字を上げたら、下位は0に戻す
+- 形式: `SZ-MAJOR.MINOR.PATCH`（現在 `SZ-0.6.1`）。PATCHは小さな修正、MINORは互換性のある機能の追加、MAJORは作業ファイルの互換性が壊れる変更。上位の数字を上げたら、下位は0に戻す
 - 正典: `src/version.js`。反映先: フッタの表示、`sw.js` のキャッシュ名、作業ファイルの `appVersion`
 - CI: `node scripts/check-version.mjs`（src/version.js と sw.js の版の一致、sw.js の事前キャッシュに src のファイルがすべて入っていること）を実行する。src にファイルを追加したら sw.js の FILES にも足す
 

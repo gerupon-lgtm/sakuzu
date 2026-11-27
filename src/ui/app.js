@@ -49,6 +49,14 @@ const S = {
   tab: "add", mode: "polar", form: {}, active: "from", vt: { cx: 0, cy: 0, k: 60 },
   highlight: [], msg: null, panelMin: false, tool: null, pick: [], measure: null, pickXY: [], textVertical: false, wDraft: null, moveSel: null, loupe: null,
 };
+const BRAND_LOGO = `<svg class="logo" viewBox="0 0 100 100" aria-hidden="true">
+  <g fill="none" stroke="#fff" stroke-width="7">
+    <circle cx="38" cy="50" r="20"/>
+    <circle cx="62" cy="50" r="20"/>
+  </g>
+  <circle cx="50" cy="34" r="8.5" fill="var(--accent)"/>
+  <circle cx="50" cy="34" r="5.5" fill="#fff"/>
+</svg>`;
 const hist = createHistory(50);
 const $app = document.getElementById("app");
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -112,7 +120,7 @@ function resetForm() {
 function render() {
   const back = (S.view === "editor" ? `<button class="btn sm" data-act="back">一覧</button>` : S.view === "preview" ? `<button class="btn sm" data-act="closePreview">作図に戻る</button>` : S.view === "settings" ? `<button class="btn sm" data-act="closeSettings">戻る</button>` : S.view === "import" ? `<button class="btn sm" data-act="impCancel">戻る</button>` : "")
     + (S.view === "list" || S.view === "editor" ? ` <button class="btn sm" data-act="settings" aria-label="設定">${ICON.gear} 設定</button>` : "");
-  const head = `<header class="noprint"><div class="logo">サ</div><h1>サクズ</h1><span class="sp"></span>${back}</header>`;
+  const head = `<header class="noprint">${BRAND_LOGO}<h1>サクズ</h1><span class="sp"></span>${back}</header>`;
   const foot = `<footer class="noprint">${APP_VERSION} ・ © 2026 SIKUMI LAB</footer>`;
   const body = S.view === "list" ? listHtml() : S.view === "preview" ? previewHtml() : S.view === "settings" ? settingsHtml() : S.view === "import" ? importHtml(S.imp) : editorHtml();
   $app.innerHTML = head + `<main>${body}</main>` + foot;

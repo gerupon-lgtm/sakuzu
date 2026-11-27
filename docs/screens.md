@@ -2,18 +2,21 @@
 
 ## デザイントークン
 
-共通モジュールの `ui/tokens.css` を正典とする（zakkuri と同じ値）。
+アプリ固有のアクセント色は `src/ui/styles.css` で定義する。書体と操作用アイコンの方針はざっくり地積と共通。
 - フォント: BIZ UDPゴシック（2026-11-25 発案者が比較モックから選択）。`"SZ BIZ UDPGothic", "BIZ UDPGothic", "Hiragino Sans", "Yu Gothic UI", "Meiryo", "Noto Sans JP", sans-serif`。`fonts/` に同梱（woff2、400・700、JIS第1・第2水準とcp932の記号に絞る。約1.6MB×2）。外部から読み込まない（C-01）。ライセンスは OFL（fonts/OFL.txt）
 - 数値の入力欄は右寄せ（`input[type=number]`、`inputmode=decimal`）
-- アイコン: Lucide（同梱）。アイコンだけのボタンには `aria-label` を付ける
+- 操作用アイコン: Lucide（同梱）。アイコンだけのボタンには `aria-label` を付ける
+- アクセント色・テーマ色: `#2F6FDE`（白文字とのコントラスト比 4.72:1）
+- アプリのロゴ: 案A。青地に二つの円と白い交点（`design/logo/a-sakuzu.svg`）
+- ホーム画面・タブ: `icons/icon-192.png`・`icon-512.png`（通常用）、`icon-maskable-192.png`・`icon-maskable-512.png`（切り抜き用）、`apple-touch-icon.png`（180px、不透明）、`favicon.svg`・`favicon-32.png`（タブ用）
 - 図面: 外形線は太線、補助線は破線（印刷しない）、寸法・文字は黒。白黒で印刷しても読めるようにする
 
 ## 共通の表示（SIKUMILAB）
 
-- ヘッダ: アイコン＋「サクズ」
-- フッタ: `SZ-0.1.0` と `© 2026 SIKUMI LAB`
+- ヘッダ: 26px のロゴ＋「サクズ」
+- フッタ: `src/version.js` の版と `© 2026 SIKUMI LAB`
 - 図面（印刷）にはブランドを入れない
-- いずれも共通モジュールの `ui/shell.js` を使う
+- ヘッダとフッタは `src/ui/app.js` で表示する
 
 ## 画面一覧
 
