@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ロゴ・アプリアイコン比較 | サクズとざっくり地積</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #192c3b;
+      --muted: #465b6d;
+      --line: #cad8e2;
+      --blueprint: #e9f0f5;
+      --paper: #f8fbfd;
+      --night: #192938;
+      --mono: "Cascadia Mono", Consolas, monospace;
+      font-family: "BIZ UDPGothic", "Yu Gothic UI", Meiryo, sans-serif;
+      color: var(--ink);
+      background: var(--paper);
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; line-height: 1.55; }
+    h1, h2, h3, p, figure, dl, dd { margin: 0; }
+    a { color: inherit; }
+    a:focus-visible, summary:focus-visible, input:focus-visible, [tabindex]:focus-visible {
+      outline: 2px solid #2f6fde;
+      outline-offset: 3px;
+    }
+
+    .sheet { width: min(1200px, calc(100% - 24px)); margin-inline: auto; }
+    .intro {
+      padding-block: clamp(28px, 5vw, 64px) 28px;
+      background-color: var(--blueprint);
+      background-image:
+        linear-gradient(to right, #dce7ef 1px, transparent 1px),
+        linear-gradient(to bottom, #dce7ef 1px, transparent 1px);
+      background-size: 24px 24px;
+      border-bottom: 1px solid var(--line);
+    }
+    .lab { color: var(--muted); font-size: .85rem; font-weight: 700; }
+    h1 {
+      margin-block: 5px 8px;
+      font-size: clamp(1.58rem, 4.2vw, 3.25rem);
+      line-height: 1.2;
+    }
+    .subtitle { font-size: .95rem; }
+    .index {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      max-width: 720px;
+      margin-top: 20px;
+    }
+    .index a {
+      display: grid;
+      justify-items: center;
+      gap: 8px;
+      padding: 12px 2px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      text-align: center;
+      text-decoration: none;
+      font-size: .8rem;
+      font-weight: 700;
+    }
+    .index a:hover { border-color: #617f98; text-decoration: underline; }
+    .index-icons { display: flex; gap: 4px; }
+
+    .option { padding-block: 32px; scroll-margin-top: 12px; }
+    .option + .option { border-top: 1px solid var(--line); }
+    .option-head {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px 22px;
+      margin-bottom: 14px;
+    }
+    h2 { font-size: clamp(1.35rem, 2.5vw, 1.8rem); }
+    .concept { margin-top: 3px; color: var(--muted); font-size: .92rem; }
+    .palette { display: flex; flex-wrap: wrap; gap: 3px 14px; }
+    .palette div, .palette dt { display: flex; align-items: center; gap: 5px; font-size: .76rem; }
+    .palette dd { font-family: var(--mono); }
+    .swatch { width: 11px; height: 11px; border-radius: 2px; background: var(--color); }
+
+    .themes { display: grid; gap: 10px; }
+    .theme {
+      --surface: #fff;
+      --rule: #dce6ed;
+      --caption: #465b6d;
+      min-width: 0;
+      padding: 9px 7px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface);
+    }
+    .theme.dark {
+      --surface: var(--night);
+      --rule: #405366;
+      --caption: #d4e0eb;
+      color: #f6f9fd;
+      border-color: var(--night);
+    }
+    .theme h3 { margin: 1px 6px 8px; font-size: .86rem; }
+    .pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+    .app-name { text-align: center; font-size: .82rem; font-weight: 700; }
+    .sample {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: end;
+      gap: 5px 10px;
+      padding-block: 10px;
+      border-top: 1px solid var(--rule);
+    }
+    .sample:first-of-type { margin-top: 6px; }
+    figure { display: grid; justify-items: center; gap: 4px; min-width: 0; }
+    figcaption {
+      color: var(--caption);
+      font-size: .74rem;
+      text-align: center;
+    }
+    .size { font-family: var(--mono); white-space: nowrap; }
+    .icon {
+      display: block;
+      flex: none;
+      max-width: 100%;
+      height: auto;
+      border-radius: 21%;
+      aspect-ratio: 1;
+    }
+    .header-sample {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 17px;
+      font-weight: 700;
+      line-height: 1.3;
+      white-space: nowrap;
+    }
+    .header-sample .icon { border-radius: 6px; }
+    .masks { border-top: 1px solid var(--rule); padding-top: 8px; }
+    .mask-label { margin-bottom: 6px; color: var(--caption); text-align: center; font-size: .74rem; }
+    .mask-samples { border-top: 0; gap: 6px 8px; padding-block: 0; }
+    .mask-round { border-radius: 50%; }
+    .mask-rounded { border-radius: 34%; }
+
+    .large {
+      margin-top: 10px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+    .large summary { font-weight: 700; cursor: pointer; }
+    .original-toggle { margin: 14px 3px 12px 0; vertical-align: middle; }
+    .original-label { font-size: .85rem; }
+    .large .themes { grid-template-columns: 1fr; }
+    .large .viewport { overflow-x: auto; }
+    .large .pair { gap: 10px; }
+    .large figcaption { font-weight: 700; }
+    .original-toggle:checked ~ .themes .pair { grid-template-columns: repeat(2, 512px); }
+
+    footer { padding-block: 9px 22px; color: var(--muted); font-size: .78rem; }
+
+    @media (min-width: 850px) {
+      .themes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .theme { padding-inline: 12px; }
+    }
+    @media (max-width: 365px) {
+      .header-sample { gap: 5px; font-size: .84rem; }
+      .index-icons { gap: 2px; }
+      .index-icons .icon { width: min(40px, 12vw); }
+    }
+  </style>
+</head>
+<body>
+  <!-- 各 symbol の図形は design/logo/ の同名 SVG と同じ。 -->
+  <svg width="0" height="0" aria-hidden="true" style="position:absolute" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="a-sakuzu" viewBox="0 0 100 100">
+      <rect width="100" height="100" fill="#2F6FDE"/>
+      <g fill="none" stroke="#fff" stroke-width="7">
+        <circle cx="38" cy="50" r="20"/>
+        <circle cx="62" cy="50" r="20"/>
+      </g>
+      <circle cx="50" cy="34" r="8.5" fill="#2F6FDE"/>
+      <circle cx="50" cy="34" r="5.5" fill="#fff"/>
+    </symbol>
+    <symbol id="a-zakkuri" viewBox="0 0 100 100">
+      <rect width="100" height="100" fill="#087D72"/>
+      <path d="M25 70 43 24 75 70Z" fill="none" stroke="#fff" stroke-width="7" stroke-linejoin="round"/>
+      <path d="M43 39v3m0 7v3m0 7v3" fill="none" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="b-sakuzu" viewBox="0 0 100 100">
+      <rect width="100" height="100" fill="#514EAD"/>
+      <path d="M22 43h56M37 31v24M63 29v16c0 14-4 22-16 29" fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="b-zakkuri" viewBox="0 0 100 100">
+      <rect width="100" height="100" fill="#A04E21"/>
+      <path d="M25 43h44M42 31l16 25M38 55c-14 5-10 17 6 17h12" fill="none" stroke="#fff" stroke-width="8" stroke-linecap="round"/>
+      <path d="m61 27 4 6m7-8 4 6" fill="none" stroke="#fff" stroke-width="5.5" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="c-sakuzu" viewBox="0 0 100 100">
+      <rect width="100" height="100" fill="#255883"/>
+      <path d="M22 43h56M37 30v24M62 29v29L46 74" fill="none" stroke="#fff" stroke-width="8" stroke-linejoin="bevel"/>
+      <path d="m62 33 10 10-10 10-10-10Z" fill="#255883"/>
+      <path d="m62 36.5 6.5 6.5-6.5 6.5-6.5-6.5Z" fill="#fff"/>
+    </symbol>
+    <symbol id="c-zakkuri" viewBox="0 0 100 100">
+      <rect width="100" height="100" fill="#576C28"/>
+      <path d="M24 43h41M49 29l24 41H44c-12 0-16-8-10-15" fill="none" stroke="#fff" stroke-width="8" stroke-linejoin="bevel"/>
+      <path d="m62 27 4 6m7-8 4 6" fill="none" stroke="#fff" stroke-width="5.5" stroke-linecap="round"/>
+    </symbol>
+  </svg>
+
+  <header class="intro">
+    <div class="sheet">
+      <p class="lab">SIKUMI LAB</p>
+      <h1>ロゴ・アプリアイコン比較</h1>
+      <p class="subtitle">左がサクズ、右がざっくり地積</p>
+      <nav class="index" aria-label="案を選ぶ"></nav>
+    </div>
+  </header>
+  <main class="sheet"></main>
+  <noscript><p class="sheet">比較見本の表示には JavaScript が必要です。</p></noscript>
+  <footer class="sheet">比較ページ S-T36.1</footer>
+
+  <script>
+    const apps = [
+      { id: "sakuzu", name: "サクズ" },
+      { id: "zakkuri", name: "ざっくり地積" },
+    ];
+
+    const options = [
+      {
+        id: "a",
+        label: "A案",
+        name: "作図の図形",
+        description: "サクズは二つの円の交点。ざっくり地積は面積を求める三角形と、その高さを示す点線。",
+      },
+      {
+        id: "b",
+        label: "B案",
+        name: "文字の図案",
+        description: "「サ」と「ざ」を、太さと線の端の丸みに共通点を持たせて描いた。",
+      },
+      {
+        id: "c",
+        label: "C案",
+        name: "文字と作図記号",
+        description: "「サ」には位置を示すひし形の点を重ね、「ざ」は三角形の斜辺と底辺を使って描いた。",
+      },
+    ];
+
+    const themes = [
+      { id: "light", name: "明るい背景" },
+      { id: "dark", name: "暗い背景" },
+    ];
+
+    function icon(id, size, shape = "") {
+      return `<svg class="icon ${shape}" width="${size}" height="${size}" viewBox="0 0 100 100" aria-hidden="true">
+        <use href="#${id}"></use>
+      </svg>`;
+    }
+
+    function sample(id, size, caption, shape) {
+      return `<figure>${icon(id, size, shape)}<figcaption>${caption}</figcaption></figure>`;
+    }
+
+    function appSamples(app) {
+      return `<div>
+        <p class="app-name">${app.name}</p>
+        <div class="sample">
+          <figure>
+            <div class="header-sample">${icon(app.mark, 26)}<span>${app.name}</span></div>
+            <figcaption><span class="size">26px</span> ヘッダ</figcaption>
+          </figure>
+        </div>
+        <div class="sample">
+          ${sample(app.mark, 16, '<span class="size">16px</span> ファビコン')}
+          ${sample(app.mark, 48, '<span class="size">48px</span>')}
+        </div>
+        <div class="sample">
+          ${sample(app.mark, 180, '<span class="size">180px</span> ホーム画面')}
+        </div>
+      </div>`;
+    }
+
+    function maskSamples(app) {
+      return `<div class="sample mask-samples" role="group" aria-label="${app.name}">
+        ${sample(app.mark, 76, "丸", "mask-round")}
+        ${sample(app.mark, 76, "角丸", "mask-rounded")}
+      </div>`;
+    }
+
+    function optionSection(option) {
+      const pair = apps.map(app => {
+        const mark = `${option.id}-${app.id}`;
+        const color = document.getElementById(mark).querySelector("rect").getAttribute("fill");
+        return { ...app, mark, color };
+      });
+      const palette = pair.map(app => `<div>
+        <dt><span class="swatch" style="--color:${app.color}" aria-hidden="true"></span>${app.name}</dt>
+        <dd>${app.color}</dd>
+      </div>`).join("");
+
+      return `<section class="option" id="${option.id}" aria-labelledby="${option.id}-title">
+        <header class="option-head">
+          <div>
+            <h2 id="${option.id}-title">${option.label}｜${option.name}</h2>
+            <p class="concept">${option.description}</p>
+          </div>
+          <dl class="palette" aria-label="配色">${palette}</dl>
+        </header>
+        <div class="themes">
+          ${themes.map(theme => `<section class="theme ${theme.id}">
+            <h3>${theme.name}</h3>
+            <div class="pair">${pair.map(appSamples).join("")}</div>
+            <div class="masks">
+              <p class="mask-label">Androidの切り抜き</p>
+              <div class="pair">${pair.map(maskSamples).join("")}</div>
+            </div>
+          </section>`).join("")}
+        </div>
+        <details class="large">
+          <summary>512pxの見本</summary>
+          <input class="original-toggle" type="checkbox" id="${option.id}-original">
+          <label class="original-label" for="${option.id}-original">原寸で表示（はみ出す場合は横にスクロール）</label>
+          <div class="themes">
+            ${themes.map(theme => `<section class="theme ${theme.id}">
+              <h3>${theme.name}</h3>
+              <div class="viewport" tabindex="0" role="region" aria-label="${option.label} 512px ${theme.name}">
+                <div class="pair">${pair.map(app => sample(app.mark, 512, app.name)).join("")}</div>
+              </div>
+            </section>`).join("")}
+          </div>
+        </details>
+      </section>`;
+    }
+
+    document.querySelector(".index").innerHTML = options.map(option => `<a href="#${option.id}">
+      <span class="index-icons">${apps.map(app => icon(`${option.id}-${app.id}`, 48)).join("")}</span>
+      <span>${option.label} ${option.name}</span>
+    </a>`).join("");
+    document.querySelector("main").innerHTML = options.map(optionSection).join("");
+  </script>
+</body>
+</html>
