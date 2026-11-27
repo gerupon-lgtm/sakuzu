@@ -120,7 +120,7 @@ function resetForm() {
 function render() {
   const back = (S.view === "editor" ? `<button class="btn sm" data-act="back">一覧</button>` : S.view === "preview" ? `<button class="btn sm" data-act="closePreview">作図に戻る</button>` : S.view === "settings" ? `<button class="btn sm" data-act="closeSettings">戻る</button>` : S.view === "import" ? `<button class="btn sm" data-act="impCancel">戻る</button>` : "")
     + (S.view === "list" || S.view === "editor" ? ` <button class="btn sm" data-act="settings" aria-label="設定">${ICON.gear} 設定</button>` : "");
-  const head = `<header class="noprint">${BRAND_LOGO}<h1>サクズ</h1><span class="sp"></span>${back}</header>`;
+  const head = `<header class="noprint">${BRAND_LOGO}<h1>サクズ</h1><span class="sp"></span>${back}</header>${updateBar()}`;
   const foot = `<footer class="noprint">${APP_VERSION} ・ © 2026 SIKUMI LAB</footer>`;
   const body = S.view === "list" ? listHtml() : S.view === "preview" ? previewHtml() : S.view === "settings" ? settingsHtml() : S.view === "import" ? importHtml(S.imp) : editorHtml();
   $app.innerHTML = head + `<main>${body}</main>` + foot;
@@ -751,11 +751,18 @@ window.addEventListener("keydown", (e) => {
 
 // PWA（公開サイトでだけ登録する。動作確認用の1ファイル版では登録しない）
 if ("serviceWorker" in navigator && location.protocol === "https:" && !document.documentElement.dataset.preview) {
+  // 新しい版の切り替え: 新版は裏で入り「待機」になる。案内の「更新する」で待機中の版に切り替えてから読み直す
+  // （ただ読み直すだけでは、開いている画面がある間は古い版のままになるため）
+  const hadController = !!navigator.serviceWorker.controller; let swReg = null, reloading = false;
+  const offerUpdate = () => { if (S.updateReady) return; S.updateReady = true; render(); };
   navigator.serviceWorker.register("sw.js").then((reg) => {
-    reg.addEventListener("updatefound", () => { const w = reg.installing; w?.addEventListener("statechange", () => {
-      if (w.state === "installed" && navigator.serviceWorker.controller) { S.msg = { html: `新しい版があります。<button class="btn sm" data-act="reload">更新する</button>`, text: "" }; render(); } }); });
+    swReg = reg; if (reg.waiting && hadController) offerUpdate();
+    reg.addEventListener("updatefound", () => { const nw = reg.installing; nw?.addEventListener("statechange", () => { if (nw.state === "installed" && navigator.serviceWorker.controller) offerUpdate(); }); });
   }).catch(() => {});
-  $app.addEventListener("click", (e) => { if (e.target.closest("[data-act=reload]")) location.reload(); });
+  navigator.serviceWorker.addEventListener("controllerchange", () => { if (hadController && !reloading) { reloading = true; location.reload(); } });
+  $app.addEventListener("click", (e) => { if (!e.target.closest("[data-act=reload]")) return; if (swReg?.waiting) swReg.waiting.postMessage("SKIP_WAITING"); else location.reload(); });
 }
+/** ヘッダの下に出す「新しい版があります」 */
+function updateBar() { return S.updateReady ? `<div class="msg noprint" style="margin:6px 12px">新しい版があります。<button class="btn sm" data-act="reload">更新する</button></div>` : ""; }
 
 (async () => { const p = await store.getPrefs(); if (p && p.tolCm != null) S.prefs = { ...S.prefs, ...p }; openList(); })();
